@@ -93,6 +93,160 @@ function bootstrap_find_matching_role(array $rolesByName, string $roleName): ?ar
     return null;
 }
 
+
+function bootstrap_find_role_by_bot_id(array $roles, string $botUserId): ?array
+{
+    foreach ($roles as $role) {
+        if (!is_array($role)) {
+            continue;
+        }
+        $roleBotId = (string)($role['tags']['bot_id'] ?? '');
+        if ($roleBotId !== '' && $roleBotId === $botUserId) {
+            return $role;
+        }
+    }
+
+    return null;
+}
+
+function bootstrap_reorder_admin_roles_beneath_bot(string $guildId, array $roles, string $botUserId): array
+{
+    $botRole = bootstrap_find_role_by_bot_id($roles, $botUserId);
+    if ($botRole === null) {
+        throw new RuntimeException('Unable to locate the bot managed role for hierarchy placement.');
+    }
+
+    $roleMap = discord_role_map($roles);
+    $serverAdminRole = bootstrap_find_matching_role(bootstrap_role_index_by_name($roles), 'Server Admin');
+    $serverModeratorRole = bootstrap_find_matching_role(bootstrap_role_index_by_name($roles), 'Server Moderator');
+
+    if ($serverAdminRole === null || $serverModeratorRole === null) {
+        throw new RuntimeException('Server Admin and Server Moderator must exist before role ordering can be applied.');
+    }
+
+    $everyoneRoleId = null;
+    foreach ($roles as $role) {
+        if (!is_array($role)) {
+            continue;
+        }
+        if ((string)($role['name'] ?? '') === '@everyone') {
+            $everyoneRoleId = (string)($role['id'] ?? '');
+            break;
+        }
+    }
+
+    $sortableRoles = [];
+    foreach ($roles as $role) {
+        if (!is_array($role)) {
+            continue;
+        }
+        $roleId = (string)($role['id'] ?? '');
+        if ($roleId === '' || $roleId === $everyoneRoleId) {
+            continue;
+        }
+        $sortableRoles[] = $role;
+    }
+
+    usort($sortableRoles, static function (array $a, array $b): int {
+        $aPos = (int)($a['position'] ?? 0);
+        $bPos = (int)($b['position'] ?? 0);
+        if ($aPos !== $bPos) {
+            return $bPos <=> $aPos;
+        }
+        return strcmp((string)($a['id'] ?? ''), (string)($b['id'] ?? ''));
+    });
+
+    $pinnedRoleIds = array_values(array_unique([
+        (string)$botRole['id'],
+        (string)$serverAdminRole['id'],
+        (string)$serverModeratorRole['id'],
+    ]));
+
+    $remainingRoles = [];
+    foreach ($sortableRoles as $role) {
+        $roleId = (string)($role['id'] ?? '');
+        if (in_array($roleId, $pinnedRoleIds, true)) {
+            continue;
+        }
+        $remainingRoles[] = $role;
+    }
+
+    $finalRoles = [
+        $roleMap[(string)$botRole['id']],
+        $roleMap[(string)$serverAdminRole['id']],
+        $roleMap[(string)$serverModeratorRole['id']],
+    ];
+    foreach ($remainingRoles as $role) {
+        $finalRoles[] = $role;
+    }
+
+    $positions = [];
+    $positionValue = count($finalRoles);
+    foreach ($finalRoles as $role) {
+        $positions[] = [
+            'id' => (string)$role['id'],
+            'position' => $positionValue,
+        ];
+        $positionValue--;
+    }
+
+    discord_reorder_roles($guildId, $positions);
+
+    return [
+        'bot_role_name' => (string)($botRole['name'] ?? ''),
+        'server_admin_role_name' => (string)($serverAdminRole['name'] ?? ''),
+        'server_moderator_role_name' => (string)($serverModeratorRole['name'] ?? ''),
+    ];
+}
+
+function bootstrap_admin_user_ids_from_env(): array
+{
+    $raw = (string)env('ADMIN_DISCORD_USER_IDS', '');
+    if ($raw === '') {
+        return [];
+    }
+
+    $parts = preg_split('/[\s,]+/', $raw) ?: [];
+    $ids = [];
+    foreach ($parts as $part) {
+        $part = trim((string)$part);
+        if ($part === '' || !preg_match('/^\d+$/', $part)) {
+            continue;
+        }
+        $ids[] = $part;
+    }
+
+    return array_values(array_unique($ids));
+}
+
+function bootstrap_assign_server_admin_role_to_env_admins(string $guildId, string $serverAdminRoleId, array $adminUserIds): array
+{
+    $applied = [];
+
+    foreach ($adminUserIds as $userId) {
+        $userId = trim((string)$userId);
+        if ($userId === '') {
+            continue;
+        }
+
+        $member = discord_get_guild_member($guildId, $userId);
+        if ($member === null) {
+            continue;
+        }
+
+        $currentRoles = array_map('strval', $member['roles'] ?? []);
+        if (in_array($serverAdminRoleId, $currentRoles, true)) {
+            continue;
+        }
+
+        $currentRoles[] = $serverAdminRoleId;
+        discord_modify_member_roles($guildId, $userId, $currentRoles);
+        $applied[] = $userId;
+    }
+
+    return $applied;
+}
+
 function bootstrap_existing_rank_mappings(PDO $pdo, int $clanId): array
 {
     $stmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, discord_role_name_cache, is_enabled
@@ -264,8 +418,17 @@ if (!$missingTables && $scanError === null && $_SERVER['REQUEST_METHOD'] === 'PO
                 $createdRoleNames[] = $roleName;
             }
 
+            $botUser = discord_get_bot_user();
+            $hierarchyResult = bootstrap_reorder_admin_roles_beneath_bot($guildId, discord_get_guild_roles($guildId), (string)($botUser['id'] ?? ''));
+
+            $discordRoles = discord_get_guild_roles($guildId);
+            $rolesByName = bootstrap_role_index_by_name($discordRoles);
+
             $serverAdminRole = bootstrap_find_matching_role($rolesByName, 'Server Admin');
             $serverModeratorRole = bootstrap_find_matching_role($rolesByName, 'Server Moderator');
+            $envAdminAssignments = ($serverAdminRole !== null)
+                ? bootstrap_assign_server_admin_role_to_env_admins($guildId, (string)$serverAdminRole['id'], bootstrap_admin_user_ids_from_env())
+                : [];
 
             $upsertGuildSettings = $pdo->prepare('INSERT INTO guild_settings (
                     clan_id,
@@ -359,6 +522,8 @@ if (!$missingTables && $scanError === null && $_SERVER['REQUEST_METHOD'] === 'PO
                 ? 'No new roles were required.'
                 : 'Created roles: ' . implode(', ', $createdRoleNames) . '.';
 
+            $parts[] = 'Role order enforced: ' . ($hierarchyResult['server_admin_role_name'] ?: 'Server Admin') . ' and ' . ($hierarchyResult['server_moderator_role_name'] ?: 'Server Moderator') . ' were placed directly beneath bot role ' . ($hierarchyResult['bot_role_name'] ?: 'Bot') . '.';
+
             $autoFilledSettings = [];
             if (empty($guildSettings['server_admin_role_id']) && $serverAdminRole !== null) {
                 $autoFilledSettings[] = 'Server Admin';
@@ -373,6 +538,10 @@ if (!$missingTables && $scanError === null && $_SERVER['REQUEST_METHOD'] === 'PO
             $parts[] = $mappingCreates === []
                 ? 'No default rank mappings needed to be added.'
                 : 'Added default rank mappings: ' . implode(', ', $mappingCreates) . '.';
+
+            $parts[] = $envAdminAssignments === []
+                ? 'No .env admin users needed the Server Admin role.'
+                : 'Assigned Server Admin to configured .env admin user IDs present in the server: ' . implode(', ', $envAdminAssignments) . '.';
 
             $parts[] = 'Guest and Clan Member auto-fill is handled through rank mappings because this schema does not have dedicated guest/clan-member guild setting columns.';
 
@@ -389,7 +558,7 @@ require_once __DIR__ . '/../../app/views/header.php';
 ?>
 <div class="card">
     <h2>Discord Role Bootstrap</h2>
-    <p class="muted">Safe first pass: scans the current guild, matches recommended roles by exact name or simple plural variants, creates only missing recommended roles, leaves existing role permissions untouched, and never reorders roles.</p>
+    <p class="muted">Scans the current guild, matches recommended roles by exact name or simple plural variants, creates only missing recommended roles, keeps existing role permissions untouched, places Server Admin and Server Moderator directly beneath the bot role, and assigns Server Admin to any in-server users listed in ADMIN_DISCORD_USER_IDS.</p>
 </div>
 
 <?php if ($missingTables): ?>
@@ -428,7 +597,8 @@ require_once __DIR__ . '/../../app/views/header.php';
             <ul>
                 <li>Creates only missing roles from the recommended list after checking exact and plural name matches.</li>
                 <li>Applies permissions only when a role is newly created.</li>
-                <li>Leaves existing roles, permissions, and order untouched.</li>
+                <li>Leaves existing role permissions untouched while moving Server Admin and Server Moderator directly beneath the bot role.</li>
+                <li>Assigns the Server Admin role to any users listed in <code>ADMIN_DISCORD_USER_IDS</code> who are currently in the server.</li>
                 <li>Auto-fills Server Admin / Server Moderator in guild settings only when those settings are currently blank.</li>
                 <li>Adds default rank mappings only when a rank currently has no mapped Discord role.</li>
             </ul>

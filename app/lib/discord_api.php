@@ -213,6 +213,36 @@ function discord_create_role(string $guildId, string $name, array $options = [])
     return $response['json'];
 }
 
+
+function discord_reorder_roles(string $guildId, array $positions): void
+{
+    $payload = [];
+    foreach ($positions as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $roleId = trim((string)($item['id'] ?? ''));
+        if ($roleId === '') {
+            continue;
+        }
+
+        $payload[] = [
+            'id' => $roleId,
+            'position' => (int)($item['position'] ?? 0),
+        ];
+    }
+
+    if ($payload === []) {
+        return;
+    }
+
+    $response = discord_request('PATCH', '/guilds/' . rawurlencode($guildId) . '/roles', $payload, discord_bot_headers());
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        throw new RuntimeException('Failed to reorder roles. Ensure the bot has Manage Roles permission and that the bot role is above the target roles.');
+    }
+}
+
 function discord_role_map(array $roles): array
 {
     $map = [];
