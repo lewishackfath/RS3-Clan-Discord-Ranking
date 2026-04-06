@@ -166,6 +166,38 @@ function plural_tail_match(string $candidateValue, string $rsnValue): bool
     return false;
 }
 
+
+function discord_role_is_bot_exempt(array $role, ?array $flag = null): bool
+{
+    $roleName = mb_strtolower(trim((string)($role['name'] ?? '')), 'UTF-8');
+    if ($roleName === 'server booster') {
+        return true;
+    }
+
+    $cachedName = mb_strtolower(trim((string)($flag['role_name_cache'] ?? '')), 'UTF-8');
+    return $cachedName === 'server booster';
+}
+
+function member_has_hidden_bot_role(array $roleIds, array $roleFlags, array $roleMap): bool
+{
+    foreach ($roleIds as $roleId) {
+        $roleId = (string)$roleId;
+        if ($roleId === '') {
+            continue;
+        }
+        $flag = $roleFlags[$roleId] ?? null;
+        if (empty($flag['is_bot_role'])) {
+            continue;
+        }
+        $role = $roleMap[$roleId] ?? [];
+        if (discord_role_is_bot_exempt(is_array($role) ? $role : [], is_array($flag) ? $flag : null)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
 function resolve_clan_member_fallback(array $membersByNormalisedRsn, array $candidateSources): array
 {
     $candidateNorms = [];

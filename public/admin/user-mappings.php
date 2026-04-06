@@ -10,20 +10,6 @@ $missingTables = require_tables($pdo, ['discord_user_mappings', 'discord_role_fl
 $guildRoles = [];
 $guildRoleMap = [];
 
-function member_has_bot_role(array $roleIds, array $roleFlags): bool
-{
-    foreach ($roleIds as $roleId) {
-        $roleId = (string)$roleId;
-        if ($roleId === '') {
-            continue;
-        }
-        $flag = $roleFlags[$roleId] ?? null;
-        if (!empty($flag['is_bot_role'])) {
-            return true;
-        }
-    }
-    return false;
-}
 
 if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
@@ -75,7 +61,7 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $currentRoleIds = array_values(array_filter(array_map('strval', $discordMember['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-            if (member_has_bot_role($currentRoleIds, $roleFlags)) {
+            if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $guildRoleMap)) {
                 $skippedBotRole++;
                 continue;
             }
@@ -170,7 +156,7 @@ if (!$missingTables) {
         }
 
         $currentRoleIds = array_values(array_filter(array_map('strval', $member['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-        if (member_has_bot_role($currentRoleIds, $roleFlags)) {
+        if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $guildRoleMap)) {
             continue;
         }
 

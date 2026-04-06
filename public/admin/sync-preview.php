@@ -177,15 +177,7 @@ if (!$missingTables) {
             }
 
             $currentRoleIds = array_values(array_filter(array_map('strval', $discordMember['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-            $hasBotRole = false;
-            foreach ($currentRoleIds as $roleId) {
-                $flag = $roleFlags[(string)$roleId] ?? null;
-                if (!empty($flag['is_bot_role'])) {
-                    $hasBotRole = true;
-                    break;
-                }
-            }
-            if ($hasBotRole) {
+            if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $roleMap)) {
                 continue;
             }
 
@@ -271,7 +263,8 @@ if (!$missingTables) {
                     }
                     $flag = $roleFlags[$roleId] ?? null;
                     $isProtected = !empty($flag['is_protected_role']);
-                    $isBotFlag = !empty($flag['is_bot_role']);
+                    $role = $roleMap[$roleId] ?? null;
+                    $isBotFlag = !empty($flag['is_bot_role']) && !discord_role_is_bot_exempt(is_array($role) ? $role : [], is_array($flag) ? $flag : null);
                     $isMappedRole = false;
                     foreach ($rankMappings as $mappingRow) {
                         if (in_array($roleId, $mappingRow['role_ids'] ?? [], true)) {
