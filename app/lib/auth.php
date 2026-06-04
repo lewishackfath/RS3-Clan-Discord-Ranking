@@ -28,21 +28,34 @@ function complete_admin_login(array $adminUser, string $accessToken): void
     $_SESSION['oauth_access_token'] = $accessToken;
 }
 
-function is_admin_authorised(array $guildMember, array $guildRoles, ?string $candidateUserId = null): bool
+function admin_discord_user_is_allowlisted(?string $candidateUserId = null): bool
 {
-    $userId = $candidateUserId;
+    $userId = trim((string)$candidateUserId);
 
-    if ($userId === null || $userId === '') {
+    if ($userId === '') {
         $admin = current_admin();
         if (!$admin) {
             return false;
         }
-        $userId = (string)($admin['id'] ?? '');
+        $userId = trim((string)($admin['id'] ?? ''));
+    }
+
+    if ($userId === '') {
+        return false;
     }
 
     $allowedUsers = csv_ids((string)env('ADMIN_DISCORD_USER_IDS', ''));
-    if ($allowedUsers && in_array($userId, $allowedUsers, true)) {
+    return $allowedUsers !== [] && in_array($userId, $allowedUsers, true);
+}
+
+function is_admin_authorised(?array $guildMember, array $guildRoles, ?string $candidateUserId = null): bool
+{
+    if (admin_discord_user_is_allowlisted($candidateUserId)) {
         return true;
+    }
+
+    if ($guildMember === null) {
+        return false;
     }
 
     $allowedRoles = csv_ids((string)env('ADMIN_DISCORD_ROLE_IDS', ''));

@@ -27,13 +27,19 @@ try {
         throw new RuntimeException('DISCORD_GUILD_ID is not configured.');
     }
 
-    $guildMember = discord_get_guild_member($guildId, (string)$user['id']);
-    if ($guildMember === null) {
-        throw new RuntimeException('Your Discord account is not a member of the configured server.');
+    $userId = (string)$user['id'];
+    $isAllowlistedAdmin = admin_discord_user_is_allowlisted($userId);
+
+    $guildMember = null;
+    if (!$isAllowlistedAdmin) {
+        $guildMember = discord_get_guild_member($guildId, $userId);
+        if ($guildMember === null) {
+            throw new RuntimeException('Your Discord account is not a member of the configured server.');
+        }
     }
 
-    $guildRoles = discord_get_guild_roles($guildId);
-    if (!is_admin_authorised($guildMember, $guildRoles, (string)$user['id'])) {
+    $guildRoles = $isAllowlistedAdmin ? [] : discord_get_guild_roles($guildId);
+    if (!is_admin_authorised($guildMember, $guildRoles, $userId)) {
         throw new RuntimeException('Your Discord account is not authorised for this admin interface.');
     }
 
