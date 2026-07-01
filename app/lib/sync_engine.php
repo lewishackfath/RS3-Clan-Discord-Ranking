@@ -195,8 +195,8 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
         $initiatedByName = $triggerSource === 'auto' ? 'Automatic Scheduler' : 'Admin';
     }
 
-    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id LIMIT 1');
-    $settingsStmt->execute(['clan_id' => $clanId]);
+    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
+    $settingsStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
     $guildSettings = $settingsStmt->fetch() ?: [];
 
     $hasTriggerSourceColumn = column_exists($pdo, 'sync_runs', 'trigger_source');
@@ -269,8 +269,8 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
         }
 
         $rankMappings = [];
-        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE clan_id = :clan_id ORDER BY rs_rank_name ASC, id ASC');
-        $mapStmt->execute(['clan_id' => $clanId]);
+        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, id ASC');
+        $mapStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
         foreach ($mapStmt->fetchAll() as $row) {
             $rankName = (string)$row['rs_rank_name'];
             if (!isset($rankMappings[$rankName])) {
@@ -278,7 +278,7 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
             }
             $rankMappings[$rankName]['is_enabled'] = (int)$row['is_enabled'] === 1;
             $roleId = trim((string)($row['discord_role_id'] ?? ''));
-            if ($roleId !== '') {
+            if ($roleId !== '' && isset($roleMap[$roleId])) {
                 $rankMappings[$rankName]['role_ids'][] = $roleId;
             }
         }
@@ -564,7 +564,7 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
 }
 
 
-function auto_sync_update_guild_status(PDO $pdo, int $clanId, array $fields): void
+function auto_sync_update_guild_status(PDO $pdo, int $clanId, array $fields, ?string $guildId = null): void
 {
     if ($clanId <= 0 || $fields === []) {
         return;
@@ -579,6 +579,10 @@ function auto_sync_update_guild_status(PDO $pdo, int $clanId, array $fields): vo
     $assignments[] = 'updated_at = CURRENT_TIMESTAMP';
 
     $sql = 'UPDATE guild_settings SET ' . implode(', ', $assignments) . ' WHERE clan_id = :clan_id';
+    if ($guildId !== null && trim($guildId) !== '') {
+        $sql .= ' AND discord_guild_id = :guild_id';
+        $params['guild_id'] = trim($guildId);
+    }
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 }
@@ -589,8 +593,8 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
         throw new RuntimeException('A valid clan ID is required for automatic sync.');
     }
 
-    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id LIMIT 1');
-    $settingsStmt->execute(['clan_id' => $clanId]);
+    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
+    $settingsStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
     $guildSettings = $settingsStmt->fetch() ?: [];
 
     $guildId = trim($guildId);
@@ -606,7 +610,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             'last_roster_import_message' => 'CLAN_NAME is missing from .env, so the latest RuneScape roster could not be imported.',
             'last_auto_sync_status' => 'error',
             'last_auto_sync_message' => 'Automatic sync skipped because CLAN_NAME is missing from .env.',
-        ]);
+        ], $guildId);
         try {
             sync_send_failure_alert($guildSettings, '❌ Auto Sync Failed', 'Roster Import', 'CLAN_NAME is missing from .env.', (string)($options['trigger_source'] ?? 'auto'));
         } catch (Throwable $ignored) {
@@ -632,7 +636,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             'last_roster_import_message' => $importMessage,
             'last_auto_sync_status' => 'running',
             'last_auto_sync_message' => 'Roster import succeeded. Live sync is now running.',
-        ]);
+        ], $guildId);
     } catch (Throwable $e) {
         auto_sync_update_guild_status($pdo, $clanId, [
             'last_roster_import_at' => now_utc(),
@@ -640,7 +644,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             'last_roster_import_message' => $e->getMessage(),
             'last_auto_sync_status' => 'error',
             'last_auto_sync_message' => 'Automatic sync skipped because the latest RuneScape roster import failed.',
-        ]);
+        ], $guildId);
         try {
             sync_send_failure_alert($guildSettings, '❌ Auto Sync Failed', 'Roster Import', $e->getMessage(), (string)($options['trigger_source'] ?? 'auto'));
         } catch (Throwable $ignored) {
@@ -659,7 +663,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             'last_auto_sync_at' => now_utc(),
             'last_auto_sync_status' => 'ok',
             'last_auto_sync_message' => $summary,
-        ]);
+        ], $guildId);
 
         return [
             'import' => $import,
@@ -669,7 +673,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
         auto_sync_update_guild_status($pdo, $clanId, [
             'last_auto_sync_status' => 'error',
             'last_auto_sync_message' => $e->getMessage(),
-        ]);
+        ], $guildId);
         throw $e;
     }
 }

@@ -7,8 +7,9 @@ $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
 $clanId = (int)env('CLAN_ID', '1');
 $missingTables = require_tables($pdo, ['discord_role_flags', 'rs_rank_mappings']);
+$missingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
 
-if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
     try {
         $discordRoles = discord_get_guild_roles($guildId);
@@ -47,7 +48,7 @@ $discordRoles = [];
 $existingFlags = [];
 $mappedRoleNames = [];
 
-if (!$missingTables) {
+if (!$missingTables && !$missingColumns) {
     $discordRoles = discord_get_guild_roles($guildId);
     usort($discordRoles, static fn(array $a, array $b): int => (int)$b['position'] <=> (int)$a['position']);
 
@@ -57,8 +58,8 @@ if (!$missingTables) {
         $existingFlags[(string)$row['discord_role_id']] = $row;
     }
 
-    $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_role_id IS NOT NULL AND discord_role_id <> ""');
-    $mapStmt->execute(['clan_id' => $clanId]);
+    $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id AND discord_role_id IS NOT NULL AND discord_role_id <> ""');
+    $mapStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
     foreach ($mapStmt->fetchAll() as $row) {
         $mappedRoleNames[(string)$row['discord_role_id']][] = (string)$row['rs_rank_name'];
     }
@@ -73,6 +74,8 @@ require_once __DIR__ . '/../../app/views/header.php';
 
 <?php if ($missingTables): ?>
     <div class="card"><span class="status bad">Setup Required</span><p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p></div>
+<?php elseif ($missingColumns): ?>
+    <div class="card"><span class="status bad">Migration Required</span><p>Missing <code>rs_rank_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code>.</p></div>
 <?php else: ?>
 <form method="post" class="card">
     <input type="hidden" name="csrf_token" value="<?= h(post_csrf_token()) ?>">

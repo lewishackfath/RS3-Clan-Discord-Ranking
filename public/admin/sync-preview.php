@@ -8,6 +8,7 @@ $guildId = (string)env('DISCORD_GUILD_ID', '');
 $clanId = (int)env('CLAN_ID', '1');
 $requiredTables = ['rs_rank_mappings', 'discord_role_flags', 'discord_user_mappings', 'clan_members', 'guild_settings'];
 $missingTables = require_tables($pdo, $requiredTables);
+$missingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
 
 function sync_status_label(string $status): array
 {
@@ -97,7 +98,7 @@ $botHighestRole = null;
 $generatedAtUtc = now_utc();
 
 
-if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'run_sync_now') {
+if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'run_sync_now') {
     verify_csrf_or_fail();
 
     try {
@@ -111,7 +112,7 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST[
 }
 
 
-if (!$missingTables) {
+if (!$missingTables && !$missingColumns) {
     try {
         $guildRoles = discord_get_guild_roles($guildId);
         $roleMap = discord_role_map($guildRoles);
@@ -135,8 +136,8 @@ if (!$missingTables) {
         }
 
         $rankMappings = [];
-        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE clan_id = :clan_id ORDER BY rs_rank_name ASC, id ASC');
-        $mapStmt->execute(['clan_id' => $clanId]);
+        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, id ASC');
+        $mapStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
         foreach ($mapStmt->fetchAll() as $row) {
             $rankName = (string)$row['rs_rank_name'];
             if (!isset($rankMappings[$rankName])) {
@@ -144,7 +145,7 @@ if (!$missingTables) {
             }
             $rankMappings[$rankName]['is_enabled'] = (int)$row['is_enabled'] === 1;
             $roleId = trim((string)($row['discord_role_id'] ?? ''));
-            if ($roleId !== '') {
+            if ($roleId !== '' && isset($roleMap[$roleId])) {
                 $rankMappings[$rankName]['role_ids'][] = $roleId;
             }
         }
@@ -375,7 +376,7 @@ require_once __DIR__ . '/../../app/views/header.php';
             <h2 style="margin:0 0 8px 0;">Sync Preview</h2>
             <p class="muted" style="margin:0;">Review the proposed changes below, then use <strong>Run Sync Now</strong> to apply the same logic live. It resolves each Discord user to a RuneScape member using manual mappings first and nickname fallback second.</p>
         </div>
-        <?php if (!$missingTables && !$errorMessage): ?>
+        <?php if (!$missingTables && !$missingColumns && !$errorMessage): ?>
         <form method="post" onsubmit="return confirm('Run live sync now? This will apply Discord role changes.');">
             <input type="hidden" name="csrf_token" value="<?= h(post_csrf_token()) ?>">
             <input type="hidden" name="action" value="run_sync_now">
@@ -389,6 +390,11 @@ require_once __DIR__ . '/../../app/views/header.php';
     <div class="card">
         <span class="status bad">Setup Required</span>
         <p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p>
+    </div>
+<?php elseif ($missingColumns): ?>
+    <div class="card">
+        <span class="status bad">Migration Required</span>
+        <p>Missing <code>rs_rank_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code>.</p>
     </div>
 <?php elseif ($errorMessage): ?>
     <div class="card">

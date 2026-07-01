@@ -10,6 +10,12 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $pdo = db();
+$currentClanId = (int)env('CLAN_ID', '0');
+$currentGuildId = trim((string)env('DISCORD_GUILD_ID', ''));
+if ($currentClanId <= 0 || $currentGuildId === '') {
+    fwrite(STDERR, "CLAN_ID and DISCORD_GUILD_ID must be configured for automatic sync." . PHP_EOL);
+    exit(1);
+}
 $requiredTables = ['guild_settings', 'rs_rank_mappings', 'discord_role_flags', 'discord_user_mappings', 'clan_members', 'sync_runs', 'sync_run_members'];
 $missingTables = require_tables($pdo, $requiredTables);
 if ($missingTables) {
@@ -18,9 +24,15 @@ if ($missingTables) {
 }
 
 $missingColumns = require_columns($pdo, 'guild_settings', ['auto_sync_enabled', 'auto_sync_interval_minutes', 'last_auto_sync_at', 'last_roster_import_at', 'last_roster_import_status', 'last_roster_import_message', 'last_auto_sync_status', 'last_auto_sync_message']);
+$rankMappingMissingColumns = require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']);
 if ($missingColumns) {
     fwrite(STDERR, "Missing required guild_settings columns: " . implode(', ', $missingColumns) . PHP_EOL);
     fwrite(STDERR, "Run sql/migrations/phase3.2-auto-sync-scheduler.sql first." . PHP_EOL);
+    exit(1);
+}
+if ($rankMappingMissingColumns) {
+    fwrite(STDERR, "Missing required rs_rank_mappings columns: " . implode(', ', $rankMappingMissingColumns) . PHP_EOL);
+    fwrite(STDERR, "Run sql/migrations/phase3.4-shared-database-guild-scoping.sql first." . PHP_EOL);
     exit(1);
 }
 
@@ -31,21 +43,25 @@ if ($lockHandle === false) {
 }
 
 try {
-    $stmt = $pdo->query('SELECT *
+    $stmt = $pdo->prepare('SELECT *
         FROM guild_settings
-        WHERE auto_sync_enabled = 1
-          AND discord_guild_id IS NOT NULL
-          AND discord_guild_id <> ""
+        WHERE clan_id = :clan_id
+          AND discord_guild_id = :guild_id
+          AND auto_sync_enabled = 1
           AND auto_sync_interval_minutes > 0
           AND (
                 last_auto_sync_at IS NULL
                 OR last_auto_sync_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL auto_sync_interval_minutes MINUTE)
           )
         ORDER BY clan_id ASC');
+    $stmt->execute([
+        'clan_id' => $currentClanId,
+        'guild_id' => $currentGuildId,
+    ]);
     $rows = $stmt->fetchAll() ?: [];
 
     if ($rows === []) {
-        fwrite(STDOUT, "No clans are currently eligible for automatic sync." . PHP_EOL);
+        fwrite(STDOUT, "This configured clan/guild is not currently eligible for automatic sync." . PHP_EOL);
         exit(0);
     }
 

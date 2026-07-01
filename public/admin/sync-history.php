@@ -104,8 +104,8 @@ if (!$missingTables) {
         $errorMessage = 'Role names could not be loaded from Discord. Showing raw role IDs instead. ' . $e->getMessage();
     }
 
-    $runSql = 'SELECT * FROM sync_runs WHERE clan_id = :clan_id';
-    $runParams = ['clan_id' => $clanId];
+    $runSql = 'SELECT * FROM sync_runs WHERE clan_id = :clan_id AND discord_guild_id = :guild_id';
+    $runParams = ['clan_id' => $clanId, 'guild_id' => $guildId];
     if ($runStatusFilter !== 'all') {
         $runSql .= ' AND status = :run_status';
         $runParams['run_status'] = $runStatusFilter;
@@ -124,8 +124,8 @@ if (!$missingTables) {
     }
 
     if ($selectedRunId > 0) {
-        $selectedStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE clan_id = :clan_id AND id = :id LIMIT 1');
-        $selectedStmt->execute(['clan_id' => $clanId, 'id' => $selectedRunId]);
+        $selectedStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE clan_id = :clan_id AND discord_guild_id = :guild_id AND id = :id LIMIT 1');
+        $selectedStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId, 'id' => $selectedRunId]);
         $selectedRun = $selectedStmt->fetch() ?: null;
     }
 

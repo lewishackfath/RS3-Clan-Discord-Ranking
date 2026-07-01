@@ -123,3 +123,21 @@ before enabling automatic sync.
 ```
 
 The cron runner uses the same live sync engine as **Run Sync Now**.
+
+## Phase 3.4 – Shared database guild isolation
+
+This patch fixes shared-database deployments where more than one app instance/clan uses the same MySQL database.
+
+Changes:
+- `cron/cron_auto_sync.php` now only processes the current `.env` pair of `CLAN_ID` and `DISCORD_GUILD_ID` instead of scanning every enabled guild in the shared database.
+- RuneScape rank-to-Discord-role mappings are now scoped by both `clan_id` and `discord_guild_id`.
+- Sync preview/live sync ignore mapped role IDs that do not exist in the currently configured Discord guild.
+- Sync history and Discord settings now filter sync runs by both clan and Discord guild.
+
+### Existing installs
+Run the migration in:
+`sql/migrations/phase3.4-shared-database-guild-scoping.sql`
+
+before using this build on a shared database.
+
+Each app instance still needs its own unique `CLAN_ID` for its RuneScape clan. Do not leave multiple clans on the default `CLAN_ID=1` when they share a database, because the clan roster itself is keyed by `clan_id`.
