@@ -5,12 +5,9 @@ require_login();
 
 $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
-$clanId = (int)env('CLAN_ID', '1');
 $requiredTables = ['rs_rank_mappings', 'discord_role_flags', 'discord_user_mappings', 'clan_members', 'guild_settings'];
 $missingTables = require_tables($pdo, $requiredTables);
-$rankMappingMissingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
-$userMappingMissingColumns = !$missingTables ? require_columns($pdo, 'discord_user_mappings', ['discord_guild_id']) : [];
-$missingColumns = array_values(array_unique(array_merge($rankMappingMissingColumns, $userMappingMissingColumns)));
+$missingColumns = [];
 
 function sync_status_label(string $status): array
 {
@@ -100,11 +97,11 @@ $botHighestRole = null;
 $generatedAtUtc = now_utc();
 
 
-if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'run_sync_now') {
+if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'run_sync_now') {
     verify_csrf_or_fail();
 
     try {
-        $summaryMessage = execute_sync_run($pdo, $guildId, $clanId, ['trigger_source' => 'manual']);
+        $summaryMessage = execute_sync_run($pdo, $guildId, ['trigger_source' => 'manual']);
         flash('success', $summaryMessage);
     } catch (Throwable $e) {
         flash('error', 'Manual sync failed: ' . $e->getMessage());
@@ -114,7 +111,7 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
 }
 
 
-if (!$missingTables && !$missingColumns) {
+if (!$missingTables) {
     try {
         $guildRoles = discord_get_guild_roles($guildId);
         $roleMap = discord_role_map($guildRoles);
@@ -138,8 +135,8 @@ if (!$missingTables && !$missingColumns) {
         }
 
         $rankMappings = [];
-        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, id ASC');
-        $mapStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, id ASC');
+        $mapStmt->execute(['guild_id' => $guildId]);
         foreach ($mapStmt->fetchAll() as $row) {
             $rankName = (string)$row['rs_rank_name'];
             if (!isset($rankMappings[$rankName])) {
@@ -153,8 +150,8 @@ if (!$missingTables && !$missingColumns) {
         }
 
         $manualMappings = [];
-        $manualStmt = $pdo->prepare('SELECT * FROM discord_user_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id');
-        $manualStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+        $manualStmt = $pdo->prepare('SELECT * FROM discord_user_mappings WHERE discord_guild_id = :guild_id');
+        $manualStmt->execute(['guild_id' => $guildId]);
         foreach ($manualStmt->fetchAll() as $row) {
             $manualMappings[(string)$row['discord_user_id']] = $row;
         }
@@ -162,8 +159,7 @@ if (!$missingTables && !$missingColumns) {
         $clanMembers = [];
         $clanById = [];
         $clanByNormalised = [];
-        $clanStmt = $pdo->prepare('SELECT * FROM clan_members WHERE clan_id = :clan_id AND is_active = 1 ORDER BY rsn ASC');
-        $clanStmt->execute(['clan_id' => $clanId]);
+        $clanStmt = $pdo->query('SELECT * FROM clan_members WHERE is_active = 1 ORDER BY rsn ASC');
         foreach (($clanStmt->fetchAll() ?: []) as $member) {
             $clanMembers[] = $member;
             $clanById[(string)$member['id']] = $member;
@@ -392,11 +388,6 @@ require_once __DIR__ . '/../../app/views/header.php';
     <div class="card">
         <span class="status bad">Setup Required</span>
         <p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p>
-    </div>
-<?php elseif ($missingColumns): ?>
-    <div class="card">
-        <span class="status bad">Migration Required</span>
-        <p>Missing shared-database column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code> and <code>sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql</code>.</p>
     </div>
 <?php elseif ($errorMessage): ?>
     <div class="card">

@@ -1,19 +1,17 @@
 CREATE TABLE IF NOT EXISTS clan_members (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    clan_id BIGINT UNSIGNED NOT NULL,
     rsn VARCHAR(32) NOT NULL,
     rsn_normalised VARCHAR(32) NOT NULL,
     rank_name VARCHAR(64) NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_clan_member_rsn (clan_id, rsn_normalised),
-    KEY idx_clan_members_clan_active (clan_id, is_active)
+    UNIQUE KEY uq_clan_member_rsn (rsn_normalised),
+    KEY idx_clan_members_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS guild_settings (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    clan_id BIGINT UNSIGNED NOT NULL,
     discord_guild_id VARCHAR(32) NOT NULL,
     guild_name_cache VARCHAR(255) NULL,
     bot_user_id VARCHAR(32) NULL,
@@ -40,13 +38,11 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     server_moderator_role_name_cache VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_guild_settings_scope (clan_id, discord_guild_id),
-    KEY idx_guild_settings_guild (discord_guild_id)
+    UNIQUE KEY uq_guild_settings_guild (discord_guild_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS rs_rank_mappings (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    clan_id BIGINT UNSIGNED NOT NULL,
     discord_guild_id VARCHAR(32) NOT NULL,
     rs_rank_name VARCHAR(64) NOT NULL,
     discord_role_id VARCHAR(32) NULL,
@@ -54,8 +50,8 @@ CREATE TABLE IF NOT EXISTS rs_rank_mappings (
     is_enabled TINYINT(1) NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    KEY idx_rs_rank_mappings_rank (clan_id, discord_guild_id, rs_rank_name),
-    UNIQUE KEY uq_rs_rank_mappings_role (clan_id, discord_guild_id, rs_rank_name, discord_role_id),
+    KEY idx_rs_rank_mappings_rank (discord_guild_id, rs_rank_name),
+    UNIQUE KEY uq_rs_rank_mappings_role (discord_guild_id, rs_rank_name, discord_role_id),
     KEY idx_rs_rank_mappings_role (discord_role_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -74,7 +70,6 @@ CREATE TABLE IF NOT EXISTS discord_role_flags (
 
 CREATE TABLE IF NOT EXISTS discord_user_mappings (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    clan_id BIGINT UNSIGNED NOT NULL,
     discord_guild_id VARCHAR(32) NOT NULL,
     discord_user_id VARCHAR(32) NOT NULL,
     member_id BIGINT UNSIGNED NOT NULL,
@@ -83,11 +78,11 @@ CREATE TABLE IF NOT EXISTS discord_user_mappings (
     discord_nickname_cache VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_discord_user_mappings (clan_id, discord_guild_id, discord_user_id),
+    UNIQUE KEY uq_discord_user_mappings (discord_guild_id, discord_user_id),
     KEY idx_discord_user_mappings_member (member_id),
     CONSTRAINT fk_discord_user_mappings_member
         FOREIGN KEY (member_id) REFERENCES clan_members(id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Rank mapping rows are created through the admin UI per configured Discord guild.
+-- Rank mapping rows are created through the admin UI for the configured Discord guild.

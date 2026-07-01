@@ -5,9 +5,8 @@ require_login();
 
 $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
-$clanId = (int)env('CLAN_ID', '1');
 $missingTables = require_tables($pdo, ['rs_rank_mappings', 'discord_role_flags']);
-$missingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
+$missingColumns = [];
 $singleSelectRanks = ['Guest', 'Clan Member'];
 
 function parse_new_role_names(string $value): array
@@ -24,7 +23,7 @@ function parse_new_role_names(string $value): array
     return array_values(array_unique($clean));
 }
 
-if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
     try {
         $roles = discord_get_guild_roles($guildId);
@@ -34,9 +33,9 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
         $newRoleNames = is_array($_POST['new_role_names'] ?? null) ? $_POST['new_role_names'] : [];
         $enabledRows = is_array($_POST['is_enabled'] ?? null) ? $_POST['is_enabled'] : [];
 
-        $deleteStmt = $pdo->prepare('DELETE FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id AND rs_rank_name = :rank_name');
-        $insertStmt = $pdo->prepare('INSERT INTO rs_rank_mappings (clan_id, discord_guild_id, rs_rank_name, discord_role_id, discord_role_name_cache, is_enabled)
-            VALUES (:clan_id, :guild_id, :rank_name, :role_id, :role_name, :is_enabled)');
+        $deleteStmt = $pdo->prepare('DELETE FROM rs_rank_mappings WHERE discord_guild_id = :guild_id AND rs_rank_name = :rank_name');
+        $insertStmt = $pdo->prepare('INSERT INTO rs_rank_mappings (discord_guild_id, rs_rank_name, discord_role_id, discord_role_name_cache, is_enabled)
+            VALUES (:guild_id, :rank_name, :role_id, :role_name, :is_enabled)');
 
         foreach (rs_rank_order() as $rankName) {
             if (in_array($rankName, $singleSelectRanks, true)) {
@@ -70,15 +69,13 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
             }
 
             $deleteStmt->execute([
-                'clan_id' => $clanId,
                 'guild_id' => $guildId,
                 'rank_name' => $rankName,
             ]);
 
             if ($existingRoleIds === []) {
                 $insertStmt->execute([
-                    'clan_id' => $clanId,
-                    'guild_id' => $guildId,
+                        'guild_id' => $guildId,
                     'rank_name' => $rankName,
                     'role_id' => null,
                     'role_name' => null,
@@ -89,8 +86,7 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
 
             foreach ($existingRoleIds as $roleId) {
                 $insertStmt->execute([
-                    'clan_id' => $clanId,
-                    'guild_id' => $guildId,
+                        'guild_id' => $guildId,
                     'rank_name' => $rankName,
                     'role_id' => $roleId,
                     'role_name' => (string)($roleMap[$roleId]['name'] ?? ''),
@@ -112,12 +108,12 @@ $rankMappings = [];
 $readiness = null;
 $roleWarnings = [];
 
-if (!$missingTables && !$missingColumns) {
+if (!$missingTables) {
     $discordRoles = discord_get_guild_roles($guildId);
     usort($discordRoles, static fn(array $a, array $b): int => (int)$b['position'] <=> (int)$a['position']);
 
-    $stmt = $pdo->prepare('SELECT * FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, discord_role_name_cache ASC');
-    $stmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+    $stmt = $pdo->prepare('SELECT * FROM rs_rank_mappings WHERE discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, discord_role_name_cache ASC');
+    $stmt->execute(['guild_id' => $guildId]);
     foreach ($stmt->fetchAll() as $row) {
         $rankName = (string)$row['rs_rank_name'];
         if (!isset($rankMappings[$rankName])) {
@@ -162,8 +158,6 @@ require_once __DIR__ . '/../../app/views/header.php';
 
 <?php if ($missingTables): ?>
     <div class="card"><span class="status bad">Setup Required</span><p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p></div>
-<?php elseif ($missingColumns): ?>
-    <div class="card"><span class="status bad">Migration Required</span><p>Missing <code>rs_rank_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code>.</p></div>
 <?php else: ?>
     <?php if ($readiness && !$readiness['ok']): ?>
         <div class="card">

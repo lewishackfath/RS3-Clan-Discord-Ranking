@@ -1,6 +1,5 @@
 CREATE TABLE IF NOT EXISTS sync_runs (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    clan_id BIGINT UNSIGNED NOT NULL,
     discord_guild_id VARCHAR(32) NOT NULL,
     initiated_by_discord_user_id VARCHAR(32) NULL,
     initiated_by_name VARCHAR(255) NULL,
@@ -16,7 +15,6 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    KEY idx_sync_runs_clan_id (clan_id),
     KEY idx_sync_runs_discord_guild_id (discord_guild_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

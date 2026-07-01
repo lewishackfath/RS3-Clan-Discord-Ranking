@@ -5,10 +5,9 @@ require_login();
 
 $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
-$clanId = (int)env('CLAN_ID', '1');
 
 $missingTables = require_tables($pdo, ['guild_settings', 'rs_rank_mappings']);
-$missingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
+$missingColumns = [];
 $guildSettings = [];
 $guild = null;
 $discordRoles = [];
@@ -248,13 +247,13 @@ function bootstrap_assign_server_admin_role_to_env_admins(string $guildId, strin
     return $applied;
 }
 
-function bootstrap_existing_rank_mappings(PDO $pdo, int $clanId, string $guildId): array
+function bootstrap_existing_rank_mappings(PDO $pdo, string $guildId): array
 {
     $stmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, discord_role_name_cache, is_enabled
         FROM rs_rank_mappings
-        WHERE clan_id = :clan_id AND discord_guild_id = :guild_id
+        WHERE discord_guild_id = :guild_id
         ORDER BY rs_rank_name ASC, id ASC');
-    $stmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+    $stmt->execute(['guild_id' => $guildId]);
 
     $out = [];
     foreach ($stmt->fetchAll() as $row) {
@@ -363,13 +362,13 @@ function bootstrap_scan_plan(array $recommendedRoles, array $rolesByName, array 
     ];
 }
 
-if (!$missingTables && !$missingColumns) {
+if (!$missingTables) {
     try {
         $guild = discord_get_guild($guildId);
         $discordRoles = discord_get_guild_roles($guildId);
 
-        $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
-        $settingsStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+        $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE discord_guild_id = :guild_id LIMIT 1');
+        $settingsStmt->execute(['guild_id' => $guildId]);
         $guildSettings = $settingsStmt->fetch() ?: [];
     } catch (Throwable $e) {
         $scanError = $e->getMessage();
@@ -377,16 +376,16 @@ if (!$missingTables && !$missingColumns) {
 }
 
 $rolesByName = bootstrap_role_index_by_name($discordRoles);
-$rankMappings = (!$missingTables && !$missingColumns && $scanError === null) ? bootstrap_existing_rank_mappings($pdo, $clanId, $guildId) : [];
+$rankMappings = (!$missingTables && $scanError === null) ? bootstrap_existing_rank_mappings($pdo, $guildId) : [];
 $recommendedRoles = bootstrap_recommended_roles();
-$scanPlan = (!$missingTables && !$missingColumns && $scanError === null) ? bootstrap_scan_plan($recommendedRoles, $rolesByName, $guildSettings, $rankMappings) : [
+$scanPlan = (!$missingTables && $scanError === null) ? bootstrap_scan_plan($recommendedRoles, $rolesByName, $guildSettings, $rankMappings) : [
     'roles' => [],
     'missing_role_names' => [],
     'settings' => [],
     'mappings' => [],
 ];
 
-if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$missingTables && $scanError === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
     $action = (string)($_POST['action'] ?? '');
 
@@ -396,10 +395,10 @@ if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQU
             $discordRoles = discord_get_guild_roles($guildId);
             $rolesByName = bootstrap_role_index_by_name($discordRoles);
 
-            $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
-            $settingsStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+            $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE discord_guild_id = :guild_id LIMIT 1');
+            $settingsStmt->execute(['guild_id' => $guildId]);
             $guildSettings = $settingsStmt->fetch() ?: [];
-            $rankMappings = bootstrap_existing_rank_mappings($pdo, $clanId, $guildId);
+            $rankMappings = bootstrap_existing_rank_mappings($pdo, $guildId);
 
             $createdRoleNames = [];
 
@@ -432,7 +431,6 @@ if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQU
                 : [];
 
             $upsertGuildSettings = $pdo->prepare('INSERT INTO guild_settings (
-                    clan_id,
                     discord_guild_id,
                     guild_name_cache,
                     server_admin_role_id,
@@ -440,7 +438,6 @@ if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQU
                     server_moderator_role_id,
                     server_moderator_role_name_cache
                 ) VALUES (
-                    :clan_id,
                     :discord_guild_id,
                     :guild_name_cache,
                     :server_admin_role_id,
@@ -469,7 +466,6 @@ if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQU
                     END');
 
             $upsertGuildSettings->execute([
-                'clan_id' => $clanId,
                 'discord_guild_id' => $guildId,
                 'guild_name_cache' => (string)($guild['name'] ?? ''),
                 'server_admin_role_id' => !empty($guildSettings['server_admin_role_id']) ? (string)$guildSettings['server_admin_role_id'] : (string)($serverAdminRole['id'] ?? ''),
@@ -479,14 +475,12 @@ if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQU
             ]);
 
             $insertMappingStmt = $pdo->prepare('INSERT INTO rs_rank_mappings (
-                    clan_id,
                     discord_guild_id,
                     rs_rank_name,
                     discord_role_id,
                     discord_role_name_cache,
                     is_enabled
                 ) VALUES (
-                    :clan_id,
                     :discord_guild_id,
                     :rs_rank_name,
                     :discord_role_id,
@@ -511,8 +505,7 @@ if (!$missingTables && !$missingColumns && $scanError === null && $_SERVER['REQU
                 }
 
                 $insertMappingStmt->execute([
-                    'clan_id' => $clanId,
-                    'discord_guild_id' => $guildId,
+                        'discord_guild_id' => $guildId,
                     'rs_rank_name' => $rankName,
                     'discord_role_id' => (string)$matchedRole['id'],
                     'discord_role_name_cache' => (string)$matchedRole['name'],
@@ -569,11 +562,6 @@ require_once __DIR__ . '/../../app/views/header.php';
     <div class="card">
         <span class="status bad">Setup Required</span>
         <p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p>
-    </div>
-<?php elseif ($missingColumns): ?>
-    <div class="card">
-        <span class="status bad">Migration Required</span>
-        <p>Missing <code>rs_rank_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code>.</p>
     </div>
 <?php elseif ($scanError !== null): ?>
     <div class="card">

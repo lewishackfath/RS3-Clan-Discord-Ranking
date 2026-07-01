@@ -4,7 +4,6 @@ require_once __DIR__ . '/../../app/config/bootstrap.php';
 require_login();
 
 $pdo = db();
-$clanId = (int)env('CLAN_ID', '1');
 $clanName = trim((string)env('CLAN_NAME', ''));
 $missingTables = require_tables($pdo, ['clan_members']);
 $importSummary = $_SESSION['last_clan_import_summary'] ?? null;
@@ -15,7 +14,7 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $action = (string)($_POST['action'] ?? '');
         if ($action === 'import_from_api') {
-            $summary = import_runescape_clan_members($pdo, $clanId, $clanName);
+            $summary = import_runescape_clan_members($pdo, $clanName);
             $_SESSION['last_clan_import_summary'] = $summary;
             flash('success', sprintf(
                 'Imported %d clan members from RuneScape for %s.',
@@ -37,8 +36,7 @@ $stats = [
     'inactive' => 0,
 ];
 if (!$missingTables) {
-    $stmt = $pdo->prepare('SELECT * FROM clan_members WHERE clan_id = :clan_id ORDER BY is_active DESC, rsn ASC');
-    $stmt->execute(['clan_id' => $clanId]);
+    $stmt = $pdo->query('SELECT * FROM clan_members ORDER BY is_active DESC, rsn ASC');
     $members = $stmt->fetchAll() ?: [];
 
     $stats['total'] = count($members);

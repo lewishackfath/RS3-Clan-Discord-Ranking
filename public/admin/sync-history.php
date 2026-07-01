@@ -5,7 +5,6 @@ require_once __DIR__ . '/../../app/config/bootstrap.php';
 require_login();
 
 $pdo = db();
-$clanId = (int)env('CLAN_ID', '1');
 $guildId = (string)env('DISCORD_GUILD_ID', '');
 $missingTables = require_tables($pdo, ['sync_runs', 'sync_run_members']);
 $hasTriggerSource = !$missingTables && column_exists($pdo, 'sync_runs', 'trigger_source');
@@ -104,8 +103,8 @@ if (!$missingTables) {
         $errorMessage = 'Role names could not be loaded from Discord. Showing raw role IDs instead. ' . $e->getMessage();
     }
 
-    $runSql = 'SELECT * FROM sync_runs WHERE clan_id = :clan_id AND discord_guild_id = :guild_id';
-    $runParams = ['clan_id' => $clanId, 'guild_id' => $guildId];
+    $runSql = 'SELECT * FROM sync_runs WHERE discord_guild_id = :guild_id';
+    $runParams = ['guild_id' => $guildId];
     if ($runStatusFilter !== 'all') {
         $runSql .= ' AND status = :run_status';
         $runParams['run_status'] = $runStatusFilter;
@@ -124,8 +123,8 @@ if (!$missingTables) {
     }
 
     if ($selectedRunId > 0) {
-        $selectedStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE clan_id = :clan_id AND discord_guild_id = :guild_id AND id = :id LIMIT 1');
-        $selectedStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId, 'id' => $selectedRunId]);
+        $selectedStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE discord_guild_id = :guild_id AND id = :id LIMIT 1');
+        $selectedStmt->execute(['guild_id' => $guildId, 'id' => $selectedRunId]);
         $selectedRun = $selectedStmt->fetch() ?: null;
     }
 

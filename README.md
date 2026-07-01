@@ -1,34 +1,16 @@
 # RS3 Clan Discord Ranker
 
-This patch pack keeps the PHP-only architecture and fixes the first-round setup/auth issues.
+PHP/MySQL application for synchronising RuneScape clan ranks to Discord roles for one configured RuneScape clan and one configured Discord guild.
 
-## Overview
+## Current model
 
-- Fixed first-login admin authorisation bug in Discord OAuth callback
-- Hardened session handling
-- Login page now redirects straight to dashboard when already signed in
-- Dashboard now handles missing schema tables gracefully instead of fatalling
-- Added setup checks to clan members, role mappings, role flags, and user mappings pages
-- Role mappings now use fixed RuneScape rank order
-- Role mappings warn when selected roles sit above the bot
-- Role flags page now shows which roles are already mapped to RuneScape ranks
-- User mappings continue to store **manual mappings only**
-- Blank user mappings remain **runtime-only nickname fallback**
+This build is intentionally **single clan per database**.
 
-## Important behaviour
-
-- Only **manual user mappings** are saved.
-- If a Discord member has no manual mapping, runtime logic should fall back to **nickname searching**.
-- Nickname matches are shown only as a **preview** in the admin UI.
-- The dashboard checks that the bot's highest role is above any mapped or bot-managed roles.
-
-## Upgrade steps
-
-1. Back up your current deployed files.
-2. Replace the project files with this patch pack.
-3. Keep your existing `.env`.
-4. If you already imported `sql/schema.sql`, there is no required DB migration for this patch.
-5. Log in again and test dashboard, role mappings, role flags, clan members, and user mappings.
+- There is no `CLAN_ID` setting.
+- The configured RuneScape clan comes from `CLAN_NAME` in `.env`.
+- The configured Discord server comes from `DISCORD_GUILD_ID` in `.env`.
+- Manual user mappings, nickname fallback matching, role mappings, sync preview, live sync, sync history, and automatic sync all operate against the local database only.
+- The cron runner only checks the configured Discord guild from `.env`.
 
 ## Requirements
 
@@ -42,125 +24,53 @@ This patch pack keeps the PHP-only architecture and fixes the first-round setup/
   - redirect URI configured
   - the bot invited to the target guild
 
-## Notes
+## Fresh install
 
-- Production-ready Discord role sync and admin tooling are included in this build.
-- If your guild is large, the user mappings page may take longer because it reads guild members directly from Discord.
-- The `Clan Members` page exists so you can seed and maintain the clan member list without needing another tool first.
+1. Upload the project files.
+2. Copy `.env.example` to `.env` and fill in your settings.
+3. Import `sql/schema.sql`.
+4. Run any phase migrations you need for older installs only. Fresh installs using the current schema do not need the historical migrations.
+5. Log in, open **Discord Settings**, save the configured server settings, then import the clan roster from **Clan Members**.
 
-## Import update
+## Upgrade from the shared-database build
 
-- Added direct RuneScape clan roster import from `members_lite.ws`
-- New `CLAN_NAME` setting in `.env`
-- The `Clan Members` page can now import the live clan roster and mark missing members inactive
-- Import parsing reuses the hardened RSN cleanup and normalisation approach from your existing sync logic
-- Safety guard: if the API parses 0 members, no database writes are made
+If you previously had multiple clans sharing a database, split/copy the database first so this database contains only the intended clan.
 
+Then back up the database and run:
 
-## Additional updates
+```bash
+mysql -u DB_USER -p DB_NAME < sql/migrations/phase3.6-single-clan-per-database.sql
+```
 
-This pack improves the User Mappings page with:
-- manual-only saved mappings
-- nickname match preview that is never auto-saved
-- search and status filters
-- mapping summary cards
-- better visibility into nickname normalisation
+After the migration, remove `CLAN_ID` from `.env`. Keep `CLAN_NAME` and `DISCORD_GUILD_ID` configured.
 
+## Main features
 
-## Patch notes
+- Discord OAuth admin login
+- Admin/user role checks via `.env`
+- RuneScape clan roster import from `members_lite.ws`
+- Read-only clan roster page sourced from RuneScape
+- RuneScape rank to Discord role mappings
+- Guest and Clan Member fallback mappings
+- Manual Discord user to RSN mappings
+- Runtime nickname fallback matching for unmapped Discord users
+- Sync preview dry-run
+- Live role sync with audit history
+- Automatic sync via cron
+- Discord log channel summaries and failure alerts
+- Optional Guest DM when a member is moved to Guest fallback
+- Discord role bootstrap for recommended roles
 
-- Clan Members page is now read-only for RSN, rank, and active status; RuneScape remains the source of truth.
-- User Mapping dropdowns now include a built-in search field that filters the RSN list by name, normalised RSN, or rank.
+## Automatic sync cron example
 
-
-## Role mapping update
-This patch adds:
-- multi-select role mappings so one RuneScape rank can map to multiple Discord roles
-- Guest and Clan Member mapping rows
-- Role Flags renamed to Role Management
-- Is Bot wording, with Discord-managed roles forced to true
-
-### Existing installs
-Run the migration in:
-`sql/migrations/phase1.4-role-mapping-multiselect.sql`
-
-before opening the updated Role Mappings page.
-
-
-## Phase 2.0 – Sync Preview
-
-This pack adds a dry-run **Sync Preview** page at `/admin/sync-preview.php`.
-
-It:
-- resolves Discord users to RuneScape members using manual mappings first, nickname fallback second
-- reads imported clan rank data
-- reads current role mappings and role management flags
-- shows current roles, target roles, add/remove previews, and blocked hierarchy cases
-- does **not** apply any Discord role changes yet
-
-
-## Phase 2.1 migration
-
-Run `sql/migrations/phase2.1-discord-settings.sql` before using the Discord Settings page.
-
-
-## Phase 3.2 – Automatic sync scheduler
-
-This pack adds:
-- automatic sync settings on the Discord Settings page
-- a cron-safe runner at `cron/cron_auto_sync.php`
-- `trigger_source` on `sync_runs` so Sync History can distinguish manual vs automatic runs
-
-### Existing installs
-Run the migration in:
-`sql/migrations/phase3.2-auto-sync-scheduler.sql`
-
-before enabling automatic sync.
-
-### Cron example
 ```bash
 */5 * * * * /usr/bin/php /path/to/project/cron/cron_auto_sync.php >> /path/to/project/storage/logs/auto-sync.log 2>&1
 ```
 
 The cron runner uses the same live sync engine as **Run Sync Now**.
 
-## Phase 3.4 – Shared database guild isolation
+## Notes
 
-This patch fixes shared-database deployments where more than one app instance/clan uses the same MySQL database.
-
-Changes:
-- `cron/cron_auto_sync.php` now only processes the current `.env` pair of `CLAN_ID` and `DISCORD_GUILD_ID` instead of scanning every enabled guild in the shared database.
-- RuneScape rank-to-Discord-role mappings are now scoped by both `clan_id` and `discord_guild_id`.
-- Sync preview/live sync ignore mapped role IDs that do not exist in the currently configured Discord guild.
-- Sync history and Discord settings now filter sync runs by both clan and Discord guild.
-
-### Existing installs
-Run the migration in:
-`sql/migrations/phase3.4-shared-database-guild-scoping.sql`
-
-before using this build on a shared database.
-
-Each app instance still needs its own unique `CLAN_ID` for its RuneScape clan. Do not leave multiple clans on the default `CLAN_ID=1` when they share a database, because the clan roster itself is keyed by `clan_id`.
-
-## Phase 3.5 – Shared database user mapping isolation
-
-This patch fixes the remaining shared-database issue where the same Discord user can appear in more than one clan Discord.
-
-Changes:
-- `guild_settings` is now keyed by the exact `clan_id` + `discord_guild_id` pair instead of treating `clan_id` or `discord_guild_id` as globally unique on their own.
-- Existing Discord user mappings are forced onto a guild-scoped unique key: `clan_id` + `discord_guild_id` + `discord_user_id`.
-- User mapping setup checks now verify the guild-scope column before the page attempts to save mappings.
-- Schema checks now use `SHOW TABLES` / `SHOW COLUMNS` instead of `information_schema`, which is safer on restricted cPanel MySQL users.
-
-### Existing installs
-Run the migration in:
-`sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql`
-
-after the Phase 3.4 migration.
-
-If your cPanel account does not allow stored procedures, use:
-`sql/migrations/phase3.5-shared-database-user-mapping-isolation-one-time-fallback.sql`
-
-Only run the fallback once, and only after a backup.
-
-After running the migration, open each app instance's **User Mappings** page and re-save any overlapping Discord users that should map to a different RSN in that Discord server.
+- Only manual user mappings are saved. Blank user selections remain runtime-only nickname fallback.
+- Nickname matches are shown as previews in the admin UI and are never saved unless you choose a manual mapping.
+- If your Discord guild is large, the User Mappings page may take longer because it reads guild members directly from Discord.

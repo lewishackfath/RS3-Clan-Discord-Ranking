@@ -5,7 +5,6 @@ require_login();
 
 $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
-$clanId = (int)env('CLAN_ID', '1');
 $allowedIntervals = [5, 10, 15, 30, 60];
 $requiredColumns = [
     'log_channel_id',
@@ -28,13 +27,11 @@ $requiredColumns = [
 
 $missingTables = require_tables($pdo, ['guild_settings']);
 $missingColumns = [];
-$rankMappingMissingColumns = [];
 if (!$missingTables) {
     $missingColumns = require_columns($pdo, 'guild_settings', $requiredColumns);
-    $rankMappingMissingColumns = require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']);
 }
 
-if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
 
     $action = (string)($_POST['action'] ?? 'save_settings');
@@ -48,7 +45,7 @@ if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns && $_SERV
 
         try {
             $admin = current_admin();
-            $result = perform_auto_sync_for_clan($pdo, $clanId, $guildId, [
+            $result = perform_auto_sync($pdo, $guildId, [
                 'trigger_source' => 'auto',
                 'initiated_by_discord_user_id' => $admin['id'] ?? null,
                 'initiated_by_name' => ($admin['username'] ?? 'Admin') . ' (Run Auto Sync Now)',
@@ -128,7 +125,6 @@ if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns && $_SERV
         }
 
         $stmt = $pdo->prepare('INSERT INTO guild_settings (
-                clan_id,
                 discord_guild_id,
                 guild_name_cache,
                 log_channel_id,
@@ -142,7 +138,6 @@ if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns && $_SERV
                 server_moderator_role_id,
                 server_moderator_role_name_cache
             ) VALUES (
-                :clan_id,
                 :guild_id,
                 :guild_name,
                 :log_channel_id,
@@ -171,7 +166,6 @@ if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns && $_SERV
                 server_moderator_role_name_cache = VALUES(server_moderator_role_name_cache)');
 
         $stmt->execute([
-            'clan_id' => $clanId,
             'guild_id' => $guildId,
             'guild_name' => (string)($guild['name'] ?? ''),
             'log_channel_id' => $logChannelId !== '' ? $logChannelId : null,
@@ -217,14 +211,14 @@ $lastRosterImportUtc = null;
 $latestAutoRun = null;
 $latestAnyRun = null;
 
-if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns) {
+if (!$missingTables && !$missingColumns) {
     try {
         $guild = discord_get_guild($guildId);
         $channels = discord_get_guild_text_channels($guildId);
         $roles = discord_get_guild_roles($guildId);
 
-        $stmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
-        $stmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+        $stmt = $pdo->prepare('SELECT * FROM guild_settings WHERE discord_guild_id = :guild_id LIMIT 1');
+        $stmt->execute(['guild_id' => $guildId]);
         $row = $stmt->fetch();
         if (is_array($row)) {
             $settings = array_merge($settings, $row);
@@ -244,13 +238,13 @@ if (!$missingTables && !$missingColumns && !$rankMappingMissingColumns) {
 
         if (table_exists($pdo, 'sync_runs')) {
             if (column_exists($pdo, 'sync_runs', 'trigger_source')) {
-                $autoStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE clan_id = :clan_id AND discord_guild_id = :guild_id AND trigger_source = "auto" ORDER BY started_at_utc DESC, id DESC LIMIT 1');
-                $autoStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+                $autoStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE discord_guild_id = :guild_id AND trigger_source = "auto" ORDER BY started_at_utc DESC, id DESC LIMIT 1');
+                $autoStmt->execute(['guild_id' => $guildId]);
                 $latestAutoRun = $autoStmt->fetch() ?: null;
             }
 
-            $latestStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE clan_id = :clan_id AND discord_guild_id = :guild_id ORDER BY started_at_utc DESC, id DESC LIMIT 1');
-            $latestStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+            $latestStmt = $pdo->prepare('SELECT * FROM sync_runs WHERE discord_guild_id = :guild_id ORDER BY started_at_utc DESC, id DESC LIMIT 1');
+            $latestStmt->execute(['guild_id' => $guildId]);
             $latestAnyRun = $latestStmt->fetch() ?: null;
         }
     } catch (Throwable $e) {
@@ -282,11 +276,6 @@ require_once __DIR__ . '/../../app/views/header.php';
             <?php endforeach; ?>
         </ul>
         <p class="muted small">Run <code>sql/migrations/phase3.3-failure-alert-roles.sql</code> after the earlier phase 3 migrations.</p>
-    </div>
-<?php elseif ($rankMappingMissingColumns): ?>
-    <div class="card">
-        <span class="status bad">Migration Required</span>
-        <p>Missing <code>rs_rank_mappings</code> column(s): <?= h(implode(', ', $rankMappingMissingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code>.</p>
     </div>
 <?php else: ?>
 <div class="grid two">

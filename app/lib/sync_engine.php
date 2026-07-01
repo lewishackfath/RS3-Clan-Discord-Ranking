@@ -172,7 +172,7 @@ function sync_update_run_status(PDO $pdo, int $syncRunId, array $counts, string 
     ]);
 }
 
-function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options = []): string
+function execute_sync_run(PDO $pdo, string $guildId, array $options = []): string
 {
     $missingApplyTables = require_tables($pdo, ['sync_runs', 'sync_run_members']);
     if ($missingApplyTables) {
@@ -195,19 +195,18 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
         $initiatedByName = $triggerSource === 'auto' ? 'Automatic Scheduler' : 'Admin';
     }
 
-    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
-    $settingsStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE discord_guild_id = :guild_id LIMIT 1');
+    $settingsStmt->execute(['guild_id' => $guildId]);
     $guildSettings = $settingsStmt->fetch() ?: [];
 
     $hasTriggerSourceColumn = column_exists($pdo, 'sync_runs', 'trigger_source');
     if ($hasTriggerSourceColumn) {
         $runStmt = $pdo->prepare('INSERT INTO sync_runs (
-            clan_id, discord_guild_id, initiated_by_discord_user_id, initiated_by_name, trigger_source, status, started_at_utc, created_at, updated_at
+            discord_guild_id, initiated_by_discord_user_id, initiated_by_name, trigger_source, status, started_at_utc, created_at, updated_at
         ) VALUES (
-            :clan_id, :discord_guild_id, :initiated_by_discord_user_id, :initiated_by_name, :trigger_source, :status, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+            :discord_guild_id, :initiated_by_discord_user_id, :initiated_by_name, :trigger_source, :status, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
         )');
         $runStmt->execute([
-            'clan_id' => $clanId,
             'discord_guild_id' => $guildId,
             'initiated_by_discord_user_id' => $initiatedByDiscordUserId,
             'initiated_by_name' => $initiatedByName,
@@ -216,12 +215,11 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
         ]);
     } else {
         $runStmt = $pdo->prepare('INSERT INTO sync_runs (
-            clan_id, discord_guild_id, initiated_by_discord_user_id, initiated_by_name, status, started_at_utc, created_at, updated_at
+            discord_guild_id, initiated_by_discord_user_id, initiated_by_name, status, started_at_utc, created_at, updated_at
         ) VALUES (
-            :clan_id, :discord_guild_id, :initiated_by_discord_user_id, :initiated_by_name, :status, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+            :discord_guild_id, :initiated_by_discord_user_id, :initiated_by_name, :status, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
         )');
         $runStmt->execute([
-            'clan_id' => $clanId,
             'discord_guild_id' => $guildId,
             'initiated_by_discord_user_id' => $initiatedByDiscordUserId,
             'initiated_by_name' => $initiatedByName,
@@ -269,8 +267,8 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
         }
 
         $rankMappings = [];
-        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, id ASC');
-        $mapStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+        $mapStmt = $pdo->prepare('SELECT rs_rank_name, discord_role_id, is_enabled FROM rs_rank_mappings WHERE discord_guild_id = :guild_id ORDER BY rs_rank_name ASC, id ASC');
+        $mapStmt->execute(['guild_id' => $guildId]);
         foreach ($mapStmt->fetchAll() as $row) {
             $rankName = (string)$row['rs_rank_name'];
             if (!isset($rankMappings[$rankName])) {
@@ -284,16 +282,15 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
         }
 
         $manualMappings = [];
-        $manualStmt = $pdo->prepare('SELECT * FROM discord_user_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id');
-        $manualStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+        $manualStmt = $pdo->prepare('SELECT * FROM discord_user_mappings WHERE discord_guild_id = :guild_id');
+        $manualStmt->execute(['guild_id' => $guildId]);
         foreach ($manualStmt->fetchAll() as $row) {
             $manualMappings[(string)$row['discord_user_id']] = $row;
         }
 
         $clanById = [];
         $clanByNormalised = [];
-        $clanStmt = $pdo->prepare('SELECT * FROM clan_members WHERE clan_id = :clan_id AND is_active = 1 ORDER BY rsn ASC');
-        $clanStmt->execute(['clan_id' => $clanId]);
+        $clanStmt = $pdo->query('SELECT * FROM clan_members WHERE is_active = 1 ORDER BY rsn ASC');
         foreach (($clanStmt->fetchAll() ?: []) as $member) {
             $clanById[(string)$member['id']] = $member;
             $norm = (string)$member['rsn_normalised'];
@@ -564,37 +561,33 @@ function execute_sync_run(PDO $pdo, string $guildId, int $clanId, array $options
 }
 
 
-function auto_sync_update_guild_status(PDO $pdo, int $clanId, array $fields, ?string $guildId = null): void
+function auto_sync_update_guild_status(PDO $pdo, array $fields, ?string $guildId = null): void
 {
-    if ($clanId <= 0 || $fields === []) {
+    if ($fields === []) {
         return;
     }
 
     $assignments = [];
-    $params = ['clan_id' => $clanId];
+    $params = [];
     foreach ($fields as $column => $value) {
         $assignments[] = $column . ' = :' . $column;
         $params[$column] = $value;
     }
     $assignments[] = 'updated_at = CURRENT_TIMESTAMP';
 
-    $sql = 'UPDATE guild_settings SET ' . implode(', ', $assignments) . ' WHERE clan_id = :clan_id';
+    $sql = 'UPDATE guild_settings SET ' . implode(', ', $assignments);
     if ($guildId !== null && trim($guildId) !== '') {
-        $sql .= ' AND discord_guild_id = :guild_id';
+        $sql .= ' WHERE discord_guild_id = :guild_id';
         $params['guild_id'] = trim($guildId);
     }
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 }
 
-function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, array $options = []): array
+function perform_auto_sync(PDO $pdo, string $guildId, array $options = []): array
 {
-    if ($clanId <= 0) {
-        throw new RuntimeException('A valid clan ID is required for automatic sync.');
-    }
-
-    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id LIMIT 1');
-    $settingsStmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+    $settingsStmt = $pdo->prepare('SELECT * FROM guild_settings WHERE discord_guild_id = :guild_id LIMIT 1');
+    $settingsStmt->execute(['guild_id' => $guildId]);
     $guildSettings = $settingsStmt->fetch() ?: [];
 
     $guildId = trim($guildId);
@@ -604,7 +597,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
 
     $clanName = trim((string)($options['clan_name'] ?? env('CLAN_NAME', '')));
     if ($clanName === '') {
-        auto_sync_update_guild_status($pdo, $clanId, [
+        auto_sync_update_guild_status($pdo, [
             'last_roster_import_at' => now_utc(),
             'last_roster_import_status' => 'error',
             'last_roster_import_message' => 'CLAN_NAME is missing from .env, so the latest RuneScape roster could not be imported.',
@@ -619,7 +612,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
     }
 
     try {
-        $import = import_runescape_clan_members($pdo, $clanId, $clanName);
+        $import = import_runescape_clan_members($pdo, $clanName);
         $importMessage = sprintf(
             'Imported %d members from RuneScape for %s. Inserted %d, updated %d, reactivated %d, marked inactive %d.',
             (int)($import['fetched'] ?? 0),
@@ -630,7 +623,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             (int)($import['marked_inactive'] ?? 0)
         );
 
-        auto_sync_update_guild_status($pdo, $clanId, [
+        auto_sync_update_guild_status($pdo, [
             'last_roster_import_at' => now_utc(),
             'last_roster_import_status' => 'ok',
             'last_roster_import_message' => $importMessage,
@@ -638,7 +631,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             'last_auto_sync_message' => 'Roster import succeeded. Live sync is now running.',
         ], $guildId);
     } catch (Throwable $e) {
-        auto_sync_update_guild_status($pdo, $clanId, [
+        auto_sync_update_guild_status($pdo, [
             'last_roster_import_at' => now_utc(),
             'last_roster_import_status' => 'error',
             'last_roster_import_message' => $e->getMessage(),
@@ -653,13 +646,13 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
     }
 
     try {
-        $summary = execute_sync_run($pdo, $guildId, $clanId, [
+        $summary = execute_sync_run($pdo, $guildId, [
             'trigger_source' => (string)($options['trigger_source'] ?? 'auto'),
             'initiated_by_discord_user_id' => $options['initiated_by_discord_user_id'] ?? null,
             'initiated_by_name' => $options['initiated_by_name'] ?? 'Automatic Scheduler',
         ]);
 
-        auto_sync_update_guild_status($pdo, $clanId, [
+        auto_sync_update_guild_status($pdo, [
             'last_auto_sync_at' => now_utc(),
             'last_auto_sync_status' => 'ok',
             'last_auto_sync_message' => $summary,
@@ -670,7 +663,7 @@ function perform_auto_sync_for_clan(PDO $pdo, int $clanId, string $guildId, arra
             'summary' => $summary,
         ];
     } catch (Throwable $e) {
-        auto_sync_update_guild_status($pdo, $clanId, [
+        auto_sync_update_guild_status($pdo, [
             'last_auto_sync_status' => 'error',
             'last_auto_sync_message' => $e->getMessage(),
         ], $guildId);

@@ -167,7 +167,7 @@ function parse_runescape_clan_members_csv(string $csv): array
     ];
 }
 
-function import_runescape_clan_members(PDO $pdo, int $clanId, string $clanName): array
+function import_runescape_clan_members(PDO $pdo, string $clanName): array
 {
     $csv = fetch_runescape_clan_members_csv($clanName);
     $parsed = parse_runescape_clan_members_csv($csv);
@@ -178,8 +178,7 @@ function import_runescape_clan_members(PDO $pdo, int $clanId, string $clanName):
         throw new RuntimeException('Parsed 0 clan members from the RuneScape API. No database changes were made.');
     }
 
-    $existingStmt = $pdo->prepare('SELECT id, rsn_normalised, is_active FROM clan_members WHERE clan_id = :clan_id');
-    $existingStmt->execute(['clan_id' => $clanId]);
+    $existingStmt = $pdo->query('SELECT id, rsn_normalised, is_active FROM clan_members');
     $existingRows = $existingStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $existingByNorm = [];
@@ -187,18 +186,18 @@ function import_runescape_clan_members(PDO $pdo, int $clanId, string $clanName):
         $existingByNorm[(string)$row['rsn_normalised']] = $row;
     }
 
-    $markInactiveStmt = $pdo->prepare('UPDATE clan_members SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE clan_id = :clan_id AND is_active = 1');
+    $markInactiveStmt = $pdo->prepare('UPDATE clan_members SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE is_active = 1');
     $upsertStmt = $pdo->prepare(
-        'INSERT INTO clan_members (clan_id, rsn, rsn_normalised, rank_name, is_active) '
-        . 'VALUES (:clan_id, :rsn, :rsn_normalised, :rank_name, 1) '
+        'INSERT INTO clan_members (rsn, rsn_normalised, rank_name, is_active) '
+        . 'VALUES (:rsn, :rsn_normalised, :rank_name, 1) '
         . 'ON DUPLICATE KEY UPDATE '
         . 'rsn = VALUES(rsn), '
         . 'rank_name = VALUES(rank_name), '
         . 'is_active = 1, '
         . 'updated_at = CURRENT_TIMESTAMP'
     );
-    $inactiveCountStmt = $pdo->prepare('SELECT COUNT(*) FROM clan_members WHERE clan_id = :clan_id AND is_active = 0');
-    $activeCountStmt = $pdo->prepare('SELECT COUNT(*) FROM clan_members WHERE clan_id = :clan_id AND is_active = 1');
+    $inactiveCountStmt = $pdo->query('SELECT COUNT(*) FROM clan_members WHERE is_active = 0');
+    $activeCountStmt = $pdo->query('SELECT COUNT(*) FROM clan_members WHERE is_active = 1');
 
     $inserted = 0;
     $updated = 0;
@@ -206,7 +205,7 @@ function import_runescape_clan_members(PDO $pdo, int $clanId, string $clanName):
 
     $pdo->beginTransaction();
     try {
-        $markInactiveStmt->execute(['clan_id' => $clanId]);
+        $markInactiveStmt->execute();
 
         foreach ($members as $member) {
             $norm = (string)$member['rsn_normalised'];
@@ -220,16 +219,13 @@ function import_runescape_clan_members(PDO $pdo, int $clanId, string $clanName):
             }
 
             $upsertStmt->execute([
-                'clan_id' => $clanId,
                 'rsn' => $member['rsn'],
                 'rsn_normalised' => $member['rsn_normalised'],
                 'rank_name' => $member['rank_name'],
             ]);
         }
 
-        $inactiveCountStmt->execute(['clan_id' => $clanId]);
         $inactiveAfter = (int)$inactiveCountStmt->fetchColumn();
-        $activeCountStmt->execute(['clan_id' => $clanId]);
         $activeAfter = (int)$activeCountStmt->fetchColumn();
 
         $pdo->commit();

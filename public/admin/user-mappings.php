@@ -5,14 +5,13 @@ require_login();
 
 $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
-$clanId = (int)env('CLAN_ID', '1');
 $missingTables = require_tables($pdo, ['discord_user_mappings', 'discord_role_flags', 'clan_members']);
-$missingColumns = !$missingTables ? require_columns($pdo, 'discord_user_mappings', ['discord_guild_id']) : [];
+$missingColumns = [];
 $guildRoles = [];
 $guildRoleMap = [];
 
 
-if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
 
     try {
@@ -37,14 +36,13 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
         $memberChoices = is_array($_POST['member_id'] ?? null) ? $_POST['member_id'] : [];
 
         $clanMembersById = [];
-        $clanStmt = $pdo->prepare('SELECT id, rsn, rank_name FROM clan_members WHERE clan_id = :clan_id AND is_active = 1');
-        $clanStmt->execute(['clan_id' => $clanId]);
+        $clanStmt = $pdo->query('SELECT id, rsn, rank_name FROM clan_members WHERE is_active = 1');
         foreach (($clanStmt->fetchAll() ?: []) as $member) {
             $clanMembersById[(string)$member['id']] = $member;
         }
 
-        $upsert = $pdo->prepare('INSERT INTO discord_user_mappings (clan_id, discord_guild_id, discord_user_id, member_id, rsn_cache, discord_username_cache, discord_nickname_cache) VALUES (:clan_id, :guild_id, :discord_user_id, :member_id, :rsn_cache, :discord_username_cache, :discord_nickname_cache) ON DUPLICATE KEY UPDATE member_id = VALUES(member_id), rsn_cache = VALUES(rsn_cache), discord_username_cache = VALUES(discord_username_cache), discord_nickname_cache = VALUES(discord_nickname_cache)');
-        $delete = $pdo->prepare('DELETE FROM discord_user_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id AND discord_user_id = :discord_user_id');
+        $upsert = $pdo->prepare('INSERT INTO discord_user_mappings (discord_guild_id, discord_user_id, member_id, rsn_cache, discord_username_cache, discord_nickname_cache) VALUES (:guild_id, :discord_user_id, :member_id, :rsn_cache, :discord_username_cache, :discord_nickname_cache) ON DUPLICATE KEY UPDATE member_id = VALUES(member_id), rsn_cache = VALUES(rsn_cache), discord_username_cache = VALUES(discord_username_cache), discord_nickname_cache = VALUES(discord_nickname_cache)');
+        $delete = $pdo->prepare('DELETE FROM discord_user_mappings WHERE discord_guild_id = :guild_id AND discord_user_id = :discord_user_id');
 
         $saved = 0;
         $cleared = 0;
@@ -71,7 +69,6 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
 
             if ($memberId === '') {
                 $delete->execute([
-                    'clan_id' => $clanId,
                     'guild_id' => $guildId,
                     'discord_user_id' => $userId,
                 ]);
@@ -85,7 +82,6 @@ if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST'
 
             $member = $clanMembersById[$memberId];
             $upsert->execute([
-                'clan_id' => $clanId,
                 'guild_id' => $guildId,
                 'discord_user_id' => $userId,
                 'member_id' => (int)$member['id'],
@@ -122,7 +118,7 @@ if (!in_array($statusFilter, $allowedStatus, true)) {
     $statusFilter = 'all';
 }
 
-if (!$missingTables && !$missingColumns) {
+if (!$missingTables) {
     $guildRoles = discord_get_guild_roles($guildId);
     $guildRoleMap = discord_role_map($guildRoles);
     $discordMembersRaw = discord_list_guild_members($guildId);
@@ -134,14 +130,13 @@ if (!$missingTables && !$missingColumns) {
         $roleFlags[(string)$row['discord_role_id']] = $row;
     }
 
-    $stmt = $pdo->prepare('SELECT * FROM discord_user_mappings WHERE clan_id = :clan_id AND discord_guild_id = :guild_id');
-    $stmt->execute(['clan_id' => $clanId, 'guild_id' => $guildId]);
+    $stmt = $pdo->prepare('SELECT * FROM discord_user_mappings WHERE discord_guild_id = :guild_id');
+    $stmt->execute(['guild_id' => $guildId]);
     foreach ($stmt->fetchAll() as $row) {
         $manualMappings[(string)$row['discord_user_id']] = $row;
     }
 
-    $clanStmt = $pdo->prepare('SELECT * FROM clan_members WHERE clan_id = :clan_id AND is_active = 1 ORDER BY rsn ASC');
-    $clanStmt->execute(['clan_id' => $clanId]);
+    $clanStmt = $pdo->query('SELECT * FROM clan_members WHERE is_active = 1 ORDER BY rsn ASC');
     $clanMembers = $clanStmt->fetchAll() ?: [];
     foreach ($clanMembers as $member) {
         $key = (string)$member['rsn_normalised'];
@@ -250,8 +245,6 @@ require_once __DIR__ . '/../../app/views/header.php';
 
 <?php if ($missingTables): ?>
     <div class="card"><span class="status bad">Setup Required</span><p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p></div>
-<?php elseif ($missingColumns): ?>
-    <div class="card"><span class="status bad">Migration Required</span><p>Missing <code>discord_user_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql</code>.</p></div>
 <?php else: ?>
 <div class="card">
     <div class="stat-grid">
