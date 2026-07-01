@@ -310,9 +310,13 @@ function mysql_identifier(string $identifier): string
 
 function table_exists(PDO $pdo, string $tableName): bool
 {
-    $stmt = $pdo->prepare('SHOW TABLES LIKE :table_name');
-    $stmt->execute(['table_name' => $tableName]);
-    return (bool)$stmt->fetchColumn();
+    // MariaDB/MySQL do not consistently allow bound parameters in SHOW statements,
+    // especially when PDO native prepares are enabled on cPanel hosts.
+    // Use PDO::quote() after validating the table name instead of preparing
+    // SHOW TABLES LIKE ? / :table_name, which can fail with a literal "?" syntax error.
+    mysql_identifier($tableName);
+    $stmt = $pdo->query('SHOW TABLES LIKE ' . $pdo->quote($tableName));
+    return $stmt ? (bool)$stmt->fetchColumn() : false;
 }
 
 function column_exists(PDO $pdo, string $tableName, string $columnName): bool
@@ -321,9 +325,11 @@ function column_exists(PDO $pdo, string $tableName, string $columnName): bool
         return false;
     }
 
-    $stmt = $pdo->prepare('SHOW COLUMNS FROM ' . mysql_identifier($tableName) . ' LIKE :column_name');
-    $stmt->execute(['column_name' => $columnName]);
-    return (bool)$stmt->fetchColumn();
+    mysql_identifier($columnName);
+    $stmt = $pdo->query(
+        'SHOW COLUMNS FROM ' . mysql_identifier($tableName) . ' LIKE ' . $pdo->quote($columnName)
+    );
+    return $stmt ? (bool)$stmt->fetchColumn() : false;
 }
 
 function require_columns(PDO $pdo, string $tableName, array $columns): array
