@@ -264,7 +264,7 @@ require_once __DIR__ . '/../../app/views/header.php';
     <div class="card">
         <span class="status bad">Setup Required</span>
         <p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p>
-        <p class="muted small">Run the required migrations before using this page.</p>
+        <p class="muted small">Run <code>sql/bootstrap.sql</code> before using this page.</p>
     </div>
 <?php elseif ($missingColumns): ?>
     <div class="card">
@@ -275,7 +275,7 @@ require_once __DIR__ . '/../../app/views/header.php';
                 <li><code><?= h($column) ?></code></li>
             <?php endforeach; ?>
         </ul>
-        <p class="muted small">Run <code>sql/migrations/phase3.3-failure-alert-roles.sql</code> after the earlier phase 3 migrations.</p>
+        <p class="muted small">Run <code>sql/bootstrap.sql</code> to create/update the failure alert columns.</p>
     </div>
 <?php else: ?>
 <div class="grid two">

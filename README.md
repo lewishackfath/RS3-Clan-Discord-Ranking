@@ -28,21 +28,21 @@ This build is intentionally **single clan per database**.
 
 1. Upload the project files.
 2. Copy `.env.example` to `.env` and fill in your settings.
-3. Import `sql/schema.sql`.
-4. Run any phase migrations you need for older installs only. Fresh installs using the current schema do not need the historical migrations.
+3. Import `sql/bootstrap.sql`.
+4. The bootstrap is idempotent and replaces all previous migration files.
 5. Log in, open **Discord Settings**, save the configured server settings, then import the clan roster from **Clan Members**.
 
 ## Upgrade from the shared-database build
 
 If you previously had multiple clans sharing a database, split/copy the database first so this database contains only the intended clan.
 
-Then back up the database and run:
+Then back up the database and run the single bootstrap:
 
 ```bash
-mysql -u DB_USER -p DB_NAME < sql/migrations/phase3.6-single-clan-per-database.sql
+mysql -u DB_USER -p DB_NAME < sql/bootstrap.sql
 ```
 
-After the migration, remove `CLAN_ID` from `.env`. Keep `CLAN_NAME` and `DISCORD_GUILD_ID` configured.
+After the bootstrap, remove `CLAN_ID` from `.env`. Keep `CLAN_NAME` and `DISCORD_GUILD_ID` configured.
 
 ## Main features
 

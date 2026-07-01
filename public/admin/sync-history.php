@@ -207,7 +207,7 @@ require_once __DIR__ . '/../../app/views/header.php';
 <?php if ($missingTables): ?>
     <div class="card">
         <span class="status bad">Setup Required</span>
-        <p>The sync audit tables are missing. Run <code>sql/migrations/phase3.0-manual-apply-sync-audit-log.sql</code> first.</p>
+        <p>The sync audit tables are missing. Run <code>sql/bootstrap.sql</code> first.</p>
     </div>
 <?php else: ?>
     <?php if ($errorMessage): ?>

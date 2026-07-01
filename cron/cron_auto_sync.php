@@ -26,7 +26,7 @@ if ($missingTables) {
 $missingColumns = require_columns($pdo, 'guild_settings', ['auto_sync_enabled', 'auto_sync_interval_minutes', 'last_auto_sync_at', 'last_roster_import_at', 'last_roster_import_status', 'last_roster_import_message', 'last_auto_sync_status', 'last_auto_sync_message']);
 if ($missingColumns) {
     fwrite(STDERR, "Missing required guild_settings columns: " . implode(', ', $missingColumns) . PHP_EOL);
-    fwrite(STDERR, "Run sql/migrations/phase3.2-auto-sync-scheduler.sql and sql/migrations/phase3.2.2-auto-sync-status-visibility.sql first." . PHP_EOL);
+    fwrite(STDERR, "Run sql/bootstrap.sql first." . PHP_EOL);
     exit(1);
 }
 

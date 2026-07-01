@@ -189,7 +189,7 @@ require_once __DIR__ . '/../../app/views/header.php';
 <?php if ($missingTables): ?>
     <div class="card">
         <span class="status bad">Setup Required</span>
-        <p>The database schema is incomplete. Import <code>sql/schema.sql</code> and make sure these tables exist:</p>
+        <p>The database schema is incomplete. Import <code>sql/bootstrap.sql</code> and make sure these tables exist:</p>
         <ul>
             <?php foreach ($missingTables as $table): ?>
                 <li><code><?= h($table) ?></code></li>
@@ -200,7 +200,7 @@ require_once __DIR__ . '/../../app/views/header.php';
     <div class="card">
         <span class="status bad">Migration Required</span>
         <p>The <code>guild_settings</code> table is missing the status visibility columns required for P3.2.2.</p>
-        <p class="muted small">Run <code>sql/migrations/phase3.2.2-auto-sync-status-visibility.sql</code> after the P3.2 scheduler migration.</p>
+        <p class="muted small">Run <code>sql/bootstrap.sql</code> to create/update the required columns.</p>
     </div>
 <?php elseif ($errorMessage): ?>
     <div class="card">

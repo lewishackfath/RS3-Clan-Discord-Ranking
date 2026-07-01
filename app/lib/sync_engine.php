@@ -176,7 +176,7 @@ function execute_sync_run(PDO $pdo, string $guildId, array $options = []): strin
 {
     $missingApplyTables = require_tables($pdo, ['sync_runs', 'sync_run_members']);
     if ($missingApplyTables) {
-        throw new RuntimeException('Sync audit tables are missing. Run sql/migrations/phase3.0-manual-apply-sync-audit-log.sql first.');
+        throw new RuntimeException('Sync audit tables are missing. Run sql/bootstrap.sql first.');
     }
 
     $triggerSource = strtolower(trim((string)($options['trigger_source'] ?? 'manual')));
