@@ -141,3 +141,26 @@ Run the migration in:
 before using this build on a shared database.
 
 Each app instance still needs its own unique `CLAN_ID` for its RuneScape clan. Do not leave multiple clans on the default `CLAN_ID=1` when they share a database, because the clan roster itself is keyed by `clan_id`.
+
+## Phase 3.5 – Shared database user mapping isolation
+
+This patch fixes the remaining shared-database issue where the same Discord user can appear in more than one clan Discord.
+
+Changes:
+- `guild_settings` is now keyed by the exact `clan_id` + `discord_guild_id` pair instead of treating `clan_id` or `discord_guild_id` as globally unique on their own.
+- Existing Discord user mappings are forced onto a guild-scoped unique key: `clan_id` + `discord_guild_id` + `discord_user_id`.
+- User mapping setup checks now verify the guild-scope column before the page attempts to save mappings.
+- Schema checks now use `SHOW TABLES` / `SHOW COLUMNS` instead of `information_schema`, which is safer on restricted cPanel MySQL users.
+
+### Existing installs
+Run the migration in:
+`sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql`
+
+after the Phase 3.4 migration.
+
+If your cPanel account does not allow stored procedures, use:
+`sql/migrations/phase3.5-shared-database-user-mapping-isolation-one-time-fallback.sql`
+
+Only run the fallback once, and only after a backup.
+
+After running the migration, open each app instance's **User Mappings** page and re-save any overlapping Discord users that should map to a different RSN in that Discord server.

@@ -1,90 +1,90 @@
 -- P3.4 Shared database / multi Discord guild isolation
 -- Run this once before deploying the P3.4 code.
--- It scopes RuneScape rank mappings to both the clan and the Discord guild.
+--
+-- cPanel-safe version: avoids information_schema because some restricted MySQL users
+-- cannot query it. Re-running is safe; duplicate column/index and missing index
+-- errors are ignored inside the migration procedure.
 
-SET @current_database = DATABASE();
+DROP PROCEDURE IF EXISTS migrate_p34_shared_database_guild_scoping;
 
-SELECT COUNT(*) INTO @has_discord_guild_id
-FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = @current_database
-  AND TABLE_NAME = 'rs_rank_mappings'
-  AND COLUMN_NAME = 'discord_guild_id';
+DELIMITER //
 
-SET @sql = IF(
-    @has_discord_guild_id = 0,
-    'ALTER TABLE rs_rank_mappings ADD COLUMN discord_guild_id VARCHAR(32) NULL AFTER clan_id',
-    'SELECT "rs_rank_mappings.discord_guild_id already exists"'
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+CREATE PROCEDURE migrate_p34_shared_database_guild_scoping()
+BEGIN
+    -- Add guild scope column when it does not already exist.
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR 1060 BEGIN END; -- Duplicate column name
+        ALTER TABLE rs_rank_mappings
+            ADD COLUMN discord_guild_id VARCHAR(32) NULL AFTER clan_id;
+    END;
 
-UPDATE rs_rank_mappings mappings
-JOIN guild_settings settings ON settings.clan_id = mappings.clan_id
-SET mappings.discord_guild_id = settings.discord_guild_id
-WHERE mappings.discord_guild_id IS NULL OR mappings.discord_guild_id = '';
+    -- Backfill existing mappings from guild_settings where possible.
+    -- If more than one guild_settings row exists for the same clan_id, this uses the
+    -- lowest id row as the safest deterministic default. After migration, review any
+    -- shared clan_id mappings and recreate per-guild mappings if required.
+    UPDATE rs_rank_mappings mappings
+    JOIN (
+        SELECT gs.clan_id, gs.discord_guild_id
+        FROM guild_settings gs
+        JOIN (
+            SELECT clan_id, MIN(id) AS id
+            FROM guild_settings
+            GROUP BY clan_id
+        ) chosen ON chosen.id = gs.id
+    ) settings ON settings.clan_id = mappings.clan_id
+    SET mappings.discord_guild_id = settings.discord_guild_id
+    WHERE mappings.discord_guild_id IS NULL OR mappings.discord_guild_id = '';
 
-UPDATE rs_rank_mappings
-SET discord_guild_id = ''
-WHERE discord_guild_id IS NULL;
+    UPDATE rs_rank_mappings
+    SET discord_guild_id = ''
+    WHERE discord_guild_id IS NULL;
 
-DELETE duplicate_row
-FROM rs_rank_mappings duplicate_row
-JOIN rs_rank_mappings kept_row
-  ON duplicate_row.id > kept_row.id
- AND duplicate_row.clan_id = kept_row.clan_id
- AND COALESCE(duplicate_row.discord_guild_id, '') = COALESCE(kept_row.discord_guild_id, '')
- AND duplicate_row.rs_rank_name = kept_row.rs_rank_name
- AND COALESCE(duplicate_row.discord_role_id, '') = COALESCE(kept_row.discord_role_id, '');
+    -- Remove duplicates before creating the new scoped unique key.
+    DELETE duplicate_row
+    FROM rs_rank_mappings duplicate_row
+    JOIN rs_rank_mappings kept_row
+      ON duplicate_row.id > kept_row.id
+     AND duplicate_row.clan_id = kept_row.clan_id
+     AND COALESCE(duplicate_row.discord_guild_id, '') = COALESCE(kept_row.discord_guild_id, '')
+     AND duplicate_row.rs_rank_name = kept_row.rs_rank_name
+     AND COALESCE(duplicate_row.discord_role_id, '') = COALESCE(kept_row.discord_role_id, '');
 
-ALTER TABLE rs_rank_mappings
-    MODIFY discord_guild_id VARCHAR(32) NOT NULL;
+    ALTER TABLE rs_rank_mappings
+        MODIFY discord_guild_id VARCHAR(32) NOT NULL;
 
-SELECT COUNT(*) INTO @has_old_unique
-FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = @current_database
-  AND TABLE_NAME = 'rs_rank_mappings'
-  AND INDEX_NAME = 'uq_rs_rank_mappings';
+    -- Drop old indexes if they exist.
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR 1091 BEGIN END; -- Can't DROP; check that column/key exists
+        ALTER TABLE rs_rank_mappings DROP INDEX uq_rs_rank_mappings;
+    END;
 
-SET @sql = IF(
-    @has_old_unique > 0,
-    'ALTER TABLE rs_rank_mappings DROP INDEX uq_rs_rank_mappings',
-    'SELECT "uq_rs_rank_mappings does not exist"'
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR 1091 BEGIN END;
+        ALTER TABLE rs_rank_mappings DROP INDEX uq_rs_rank_mappings_role;
+    END;
 
-SELECT COUNT(*) INTO @has_role_unique
-FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = @current_database
-  AND TABLE_NAME = 'rs_rank_mappings'
-  AND INDEX_NAME = 'uq_rs_rank_mappings_role';
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR 1091 BEGIN END;
+        ALTER TABLE rs_rank_mappings DROP INDEX idx_rs_rank_mappings_rank;
+    END;
 
-SET @sql = IF(
-    @has_role_unique > 0,
-    'ALTER TABLE rs_rank_mappings DROP INDEX uq_rs_rank_mappings_role',
-    'SELECT "uq_rs_rank_mappings_role does not exist"'
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+    -- Add the new guild-scoped indexes. Ignore duplicate index errors so the
+    -- migration can be re-run safely.
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR 1061 BEGIN END; -- Duplicate key name
+        ALTER TABLE rs_rank_mappings
+            ADD KEY idx_rs_rank_mappings_rank (clan_id, discord_guild_id, rs_rank_name);
+    END;
 
-SELECT COUNT(*) INTO @has_rank_index
-FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = @current_database
-  AND TABLE_NAME = 'rs_rank_mappings'
-  AND INDEX_NAME = 'idx_rs_rank_mappings_rank';
+    BEGIN
+        DECLARE CONTINUE HANDLER FOR 1061 BEGIN END;
+        ALTER TABLE rs_rank_mappings
+            ADD UNIQUE KEY uq_rs_rank_mappings_role (clan_id, discord_guild_id, rs_rank_name, discord_role_id);
+    END;
+END//
 
-SET @sql = IF(
-    @has_rank_index > 0,
-    'ALTER TABLE rs_rank_mappings DROP INDEX idx_rs_rank_mappings_rank',
-    'SELECT "idx_rs_rank_mappings_rank does not exist"'
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+DELIMITER ;
 
-ALTER TABLE rs_rank_mappings
-    ADD KEY idx_rs_rank_mappings_rank (clan_id, discord_guild_id, rs_rank_name),
-    ADD UNIQUE KEY uq_rs_rank_mappings_role (clan_id, discord_guild_id, rs_rank_name, discord_role_id);
+CALL migrate_p34_shared_database_guild_scoping();
+
+DROP PROCEDURE IF EXISTS migrate_p34_shared_database_guild_scoping;

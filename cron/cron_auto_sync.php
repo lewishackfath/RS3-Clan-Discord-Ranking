@@ -25,6 +25,7 @@ if ($missingTables) {
 
 $missingColumns = require_columns($pdo, 'guild_settings', ['auto_sync_enabled', 'auto_sync_interval_minutes', 'last_auto_sync_at', 'last_roster_import_at', 'last_roster_import_status', 'last_roster_import_message', 'last_auto_sync_status', 'last_auto_sync_message']);
 $rankMappingMissingColumns = require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']);
+$userMappingMissingColumns = require_columns($pdo, 'discord_user_mappings', ['discord_guild_id']);
 if ($missingColumns) {
     fwrite(STDERR, "Missing required guild_settings columns: " . implode(', ', $missingColumns) . PHP_EOL);
     fwrite(STDERR, "Run sql/migrations/phase3.2-auto-sync-scheduler.sql first." . PHP_EOL);
@@ -33,6 +34,11 @@ if ($missingColumns) {
 if ($rankMappingMissingColumns) {
     fwrite(STDERR, "Missing required rs_rank_mappings columns: " . implode(', ', $rankMappingMissingColumns) . PHP_EOL);
     fwrite(STDERR, "Run sql/migrations/phase3.4-shared-database-guild-scoping.sql first." . PHP_EOL);
+    exit(1);
+}
+if ($userMappingMissingColumns) {
+    fwrite(STDERR, "Missing required discord_user_mappings columns: " . implode(', ', $userMappingMissingColumns) . PHP_EOL);
+    fwrite(STDERR, "Run sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql first." . PHP_EOL);
     exit(1);
 }
 

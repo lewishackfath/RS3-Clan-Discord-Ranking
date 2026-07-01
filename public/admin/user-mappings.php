@@ -7,11 +7,12 @@ $pdo = db();
 $guildId = (string)env('DISCORD_GUILD_ID', '');
 $clanId = (int)env('CLAN_ID', '1');
 $missingTables = require_tables($pdo, ['discord_user_mappings', 'discord_role_flags', 'clan_members']);
+$missingColumns = !$missingTables ? require_columns($pdo, 'discord_user_mappings', ['discord_guild_id']) : [];
 $guildRoles = [];
 $guildRoleMap = [];
 
 
-if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$missingTables && !$missingColumns && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf_or_fail();
 
     try {
@@ -121,7 +122,7 @@ if (!in_array($statusFilter, $allowedStatus, true)) {
     $statusFilter = 'all';
 }
 
-if (!$missingTables) {
+if (!$missingTables && !$missingColumns) {
     $guildRoles = discord_get_guild_roles($guildId);
     $guildRoleMap = discord_role_map($guildRoles);
     $discordMembersRaw = discord_list_guild_members($guildId);
@@ -249,6 +250,8 @@ require_once __DIR__ . '/../../app/views/header.php';
 
 <?php if ($missingTables): ?>
     <div class="card"><span class="status bad">Setup Required</span><p>Missing table(s): <?= h(implode(', ', $missingTables)) ?></p></div>
+<?php elseif ($missingColumns): ?>
+    <div class="card"><span class="status bad">Migration Required</span><p>Missing <code>discord_user_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql</code>.</p></div>
 <?php else: ?>
 <div class="card">
     <div class="stat-grid">

@@ -300,17 +300,29 @@ function discord_avatar_url(array $user, int $size = 64): string
     return 'https://cdn.discordapp.com/embed/avatars/' . $index . '.png';
 }
 
+function mysql_identifier(string $identifier): string
+{
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $identifier)) {
+        throw new InvalidArgumentException('Invalid database identifier: ' . $identifier);
+    }
+    return '`' . str_replace('`', '``', $identifier) . '`';
+}
+
 function table_exists(PDO $pdo, string $tableName): bool
 {
-    $stmt = $pdo->prepare('SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :table LIMIT 1');
-    $stmt->execute(['table' => $tableName]);
+    $stmt = $pdo->prepare('SHOW TABLES LIKE :table_name');
+    $stmt->execute(['table_name' => $tableName]);
     return (bool)$stmt->fetchColumn();
 }
 
 function column_exists(PDO $pdo, string $tableName, string $columnName): bool
 {
-    $stmt = $pdo->prepare('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = :table AND column_name = :column LIMIT 1');
-    $stmt->execute(['table' => $tableName, 'column' => $columnName]);
+    if (!table_exists($pdo, $tableName)) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare('SHOW COLUMNS FROM ' . mysql_identifier($tableName) . ' LIKE :column_name');
+    $stmt->execute(['column_name' => $columnName]);
     return (bool)$stmt->fetchColumn();
 }
 

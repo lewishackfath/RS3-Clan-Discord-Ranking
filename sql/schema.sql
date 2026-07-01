@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     server_moderator_role_name_cache VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_guild_settings_clan (clan_id),
-    UNIQUE KEY uq_guild_settings_guild (discord_guild_id)
+    UNIQUE KEY uq_guild_settings_scope (clan_id, discord_guild_id),
+    KEY idx_guild_settings_guild (discord_guild_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS rs_rank_mappings (

@@ -8,7 +8,9 @@ $guildId = (string)env('DISCORD_GUILD_ID', '');
 $clanId = (int)env('CLAN_ID', '1');
 $requiredTables = ['rs_rank_mappings', 'discord_role_flags', 'discord_user_mappings', 'clan_members', 'guild_settings'];
 $missingTables = require_tables($pdo, $requiredTables);
-$missingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
+$rankMappingMissingColumns = !$missingTables ? require_columns($pdo, 'rs_rank_mappings', ['discord_guild_id']) : [];
+$userMappingMissingColumns = !$missingTables ? require_columns($pdo, 'discord_user_mappings', ['discord_guild_id']) : [];
+$missingColumns = array_values(array_unique(array_merge($rankMappingMissingColumns, $userMappingMissingColumns)));
 
 function sync_status_label(string $status): array
 {
@@ -394,7 +396,7 @@ require_once __DIR__ . '/../../app/views/header.php';
 <?php elseif ($missingColumns): ?>
     <div class="card">
         <span class="status bad">Migration Required</span>
-        <p>Missing <code>rs_rank_mappings</code> column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code>.</p>
+        <p>Missing shared-database column(s): <?= h(implode(', ', $missingColumns)) ?>. Run <code>sql/migrations/phase3.4-shared-database-guild-scoping.sql</code> and <code>sql/migrations/phase3.5-shared-database-user-mapping-isolation.sql</code>.</p>
     </div>
 <?php elseif ($errorMessage): ?>
     <div class="card">
