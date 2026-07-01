@@ -17,13 +17,6 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $discordMembers = discord_list_guild_members($guildId);
 
-        $roleFlags = [];
-        $flagStmt = $pdo->prepare('SELECT * FROM discord_role_flags WHERE discord_guild_id = :guild_id');
-        $flagStmt->execute(['guild_id' => $guildId]);
-        foreach (($flagStmt->fetchAll() ?: []) as $row) {
-            $roleFlags[(string)$row['discord_role_id']] = $row;
-        }
-
         $discordMembersById = [];
         foreach ($discordMembers as $discordMember) {
             $summary = discord_format_member_summary($discordMember);
@@ -46,7 +39,6 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $saved = 0;
         $cleared = 0;
-        $skippedBotRole = 0;
         foreach ($memberChoices as $userId => $selectedMemberId) {
             $userId = trim((string)$userId);
             if ($userId === '' || !isset($discordMembersById[$userId])) {
@@ -56,12 +48,6 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $discordMember = $discordMembersById[$userId]['member'];
             $summary = $discordMembersById[$userId]['summary'];
             if ((bool)($discordMember['user']['bot'] ?? false)) {
-                continue;
-            }
-
-            $currentRoleIds = array_values(array_filter(array_map('strval', $discordMember['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-            if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $guildRoleMap)) {
-                $skippedBotRole++;
                 continue;
             }
 
@@ -93,9 +79,6 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $message = 'User mappings saved. Manual mappings updated: ' . $saved . '. Cleared mappings: ' . $cleared . '.';
-        if ($skippedBotRole > 0) {
-            $message .= ' Skipped bot-role users: ' . $skippedBotRole . '.';
-        }
         $message .= ' Blank selections remain runtime-only nickname fallbacks.';
         flash('success', $message);
     } catch (Throwable $e) {
@@ -152,10 +135,6 @@ if (!$missingTables) {
         }
 
         $currentRoleIds = array_values(array_filter(array_map('strval', $member['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-        if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $guildRoleMap)) {
-            continue;
-        }
-
         $userId = (string)$summary['user_id'];
         $manual = $manualMappings[$userId] ?? null;
         $nickname = (string)$summary['nickname'];

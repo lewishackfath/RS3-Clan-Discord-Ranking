@@ -176,9 +176,6 @@ if (!$missingTables) {
             }
 
             $currentRoleIds = array_values(array_filter(array_map('strval', $discordMember['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-            if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $roleMap)) {
-                continue;
-            }
 
             $summaryMember = discord_format_member_summary($discordMember);
             $userId = (string)$summaryMember['user_id'];

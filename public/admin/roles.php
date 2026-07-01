@@ -25,12 +25,13 @@ if (!$missingTables && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $roleId = (string)$role['id'];
             $isManaged = !empty($role['managed']);
+            $isPremiumSubscriberRole = discord_role_is_premium_subscriber_role($role);
             $upsert->execute([
                 'guild_id' => $guildId,
                 'role_id' => $roleId,
                 'role_name' => (string)$role['name'],
                 'position_cache' => (int)$role['position'],
-                'is_bot_role' => $isManaged || isset($isBotFlags[$roleId]) ? 1 : 0,
+                'is_bot_role' => (!$isPremiumSubscriberRole && ($isManaged || isset($isBotFlags[$roleId]))) ? 1 : 0,
                 'is_protected_role' => isset($protectedFlags[$roleId]) ? 1 : 0,
             ]);
         }
@@ -68,7 +69,7 @@ require_once __DIR__ . '/../../app/views/header.php';
 ?>
 <div class="card">
     <h2>Role Management</h2>
-    <p class="muted">Use this page to classify Discord roles. “Is Bot” is forced on for Discord-managed or integration-managed roles. Protected roles are roles that later sync logic must never remove from members.</p>
+    <p class="muted">Use this page to classify Discord roles. “Is Bot” is forced on for Discord-managed or integration-managed roles, except Discord Server Booster/Nitro Booster roles. Protected roles are roles that later sync logic must never remove from members.</p>
 </div>
 
 <?php if ($missingTables): ?>
@@ -94,7 +95,8 @@ require_once __DIR__ . '/../../app/views/header.php';
             $flags = $existingFlags[$roleId] ?? null;
             $mappedRanks = $mappedRoleNames[$roleId] ?? [];
             $isManaged = !empty($role['managed']);
-            $isBot = $isManaged || ($flags && (int)$flags['is_bot_role'] === 1);
+            $isPremiumSubscriberRole = discord_role_is_premium_subscriber_role($role, is_array($flags) ? $flags : null);
+            $isBot = !$isPremiumSubscriberRole && ($isManaged || ($flags && (int)$flags['is_bot_role'] === 1));
         ?>
             <tr>
                 <td><strong><?= h((string)$role['name']) ?></strong><br><span class="small muted"><?= h($roleId) ?></span></td>
@@ -103,10 +105,12 @@ require_once __DIR__ . '/../../app/views/header.php';
                 <td><?= $mappedRanks ? h(implode(', ', $mappedRanks)) : '<span class="muted">—</span>' ?></td>
                 <td>
                     <label>
-                        <input type="checkbox" name="is_bot_role[<?= h($roleId) ?>]" <?= $isBot ? 'checked' : '' ?> <?= $isManaged ? 'disabled' : '' ?>>
+                        <input type="checkbox" name="is_bot_role[<?= h($roleId) ?>]" <?= $isBot ? 'checked' : '' ?> <?= ($isManaged && !$isPremiumSubscriberRole) ? 'disabled' : '' ?>>
                         Is Bot
                     </label>
-                    <?php if ($isManaged): ?>
+                    <?php if ($isPremiumSubscriberRole): ?>
+                        <div class="small muted">Server Booster/Nitro Booster roles are treated as human member roles, not bot roles.</div>
+                    <?php elseif ($isManaged): ?>
                         <div class="small muted">Forced on because this role is Discord-managed.</div>
                     <?php endif; ?>
                 </td>

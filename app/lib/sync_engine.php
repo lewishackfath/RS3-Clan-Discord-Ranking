@@ -316,9 +316,6 @@ function execute_sync_run(PDO $pdo, string $guildId, array $options = []): strin
             }
 
             $currentRoleIds = array_values(array_filter(array_map('strval', $discordMember['roles'] ?? []), static fn(string $id): bool => $id !== ''));
-            if (member_has_hidden_bot_role($currentRoleIds, $roleFlags, $roleMap)) {
-                continue;
-            }
 
             $counts['total']++;
             $summaryMember = discord_format_member_summary($discordMember);

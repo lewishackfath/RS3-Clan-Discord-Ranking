@@ -167,15 +167,36 @@ function plural_tail_match(string $candidateValue, string $rsnValue): bool
 }
 
 
-function discord_role_is_bot_exempt(array $role, ?array $flag = null): bool
+function discord_role_is_premium_subscriber_role(array $role, ?array $flag = null): bool
 {
-    $roleName = mb_strtolower(trim((string)($role['name'] ?? '')), 'UTF-8');
-    if ($roleName === 'server booster') {
+    $tags = $role['tags'] ?? null;
+    if (is_array($tags) && array_key_exists('premium_subscriber', $tags)) {
         return true;
     }
 
-    $cachedName = mb_strtolower(trim((string)($flag['role_name_cache'] ?? '')), 'UTF-8');
-    return $cachedName === 'server booster';
+    $names = [
+        mb_strtolower(trim((string)($role['name'] ?? '')), 'UTF-8'),
+        mb_strtolower(trim((string)($flag['role_name_cache'] ?? '')), 'UTF-8'),
+    ];
+
+    foreach ($names as $name) {
+        if ($name === '') {
+            continue;
+        }
+        if ($name === 'server booster' || $name === 'server boosters') {
+            return true;
+        }
+        if (str_contains($name, 'server booster') || str_contains($name, 'server boosters') || str_contains($name, 'nitro booster')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function discord_role_is_bot_exempt(array $role, ?array $flag = null): bool
+{
+    return discord_role_is_premium_subscriber_role($role, $flag);
 }
 
 function member_has_hidden_bot_role(array $roleIds, array $roleFlags, array $roleMap): bool
